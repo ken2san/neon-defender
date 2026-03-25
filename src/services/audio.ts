@@ -194,6 +194,43 @@ class RetroAudio {
     osc.stop(this.ctx.currentTime + 1.5);
   }
 
+  playWaveClear() {
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    
+    osc.frequency.setValueAtTime(523.25, this.ctx.currentTime); // C5
+    osc.frequency.exponentialRampToValueAtTime(1046.50, this.ctx.currentTime + 0.1); // C6
+    osc.frequency.exponentialRampToValueAtTime(1567.98, this.ctx.currentTime + 0.2); // G6
+    
+    gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.3);
+    
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.3);
+  }
+
+  playComboBreak() {
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    
+    osc.frequency.setValueAtTime(220, this.ctx.currentTime);
+    osc.frequency.linearRampToValueAtTime(55, this.ctx.currentTime + 0.3);
+    
+    gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.3);
+    
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.3);
+  }
+
   playBGM() {
     if (!this.ctx) return;
     this.stopBGM(); // Prevent overlapping

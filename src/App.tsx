@@ -55,6 +55,13 @@ interface Enemy {
   phase?: number;
   moveDir?: number;
   lastShotTime?: number;
+  // Entry path properties
+  state: 'ENTERING' | 'IN_FORMATION' | 'DIVING' | 'RETURNING';
+  path?: { x: number, y: number }[];
+  pathIndex?: number;
+  entryDelay?: number;
+  prevX?: number;
+  prevY?: number;
 }
 
 interface Particle {
@@ -117,6 +124,8 @@ export default function App() {
   const [highScore, setHighScore] = useState(0);
   const [lives, setLives] = useState(3);
   const [wave, setWave] = useState(1);
+  const [sectorName, setSectorName] = useState('Outer Rim');
+  const [distance, setDistance] = useState(25000);
   const [assets, setAssets] = useState<Record<string, HTMLImageElement>>({});
   const [isTouchDevice, setIsTouchDevice] = useState(false);
 
@@ -132,6 +141,9 @@ export default function App() {
   const trails = useRef<Trail[]>([]);
   const shake = useRef(0);
   const flash = useRef(0);
+  const glitch = useRef(0);
+  const offscreenCanvas = useRef<HTMLCanvasElement | null>(null);
+  const offscreenCtx = useRef<CanvasRenderingContext2D | null>(null);
   const keysPressed = useRef<Record<string, boolean>>({});
   const lastShotTime = useRef(0);
   const lastDiveTime = useRef(0);
@@ -156,7 +168,7 @@ export default function App() {
   const warpFactor = useRef(0);
   const warpStartTime = useRef(0);
 
-  // Initialize stars
+  // Initialize stars and offscreen canvas
   useEffect(() => {
     stars.current = Array.from({ length: 100 }, () => ({
       x: Math.random() * CANVAS_WIDTH,
@@ -165,6 +177,12 @@ export default function App() {
       speed: Math.random() * 2 + 0.5,
       opacity: Math.random() * 0.5 + 0.2
     }));
+
+    // Initialize offscreen canvas for post-processing
+    offscreenCanvas.current = document.createElement('canvas');
+    offscreenCanvas.current.width = CANVAS_WIDTH;
+    offscreenCanvas.current.height = CANVAS_HEIGHT;
+    offscreenCtx.current = offscreenCanvas.current.getContext('2d');
   }, []);
 
   // Detect touch device and handle resize
@@ -214,34 +232,43 @@ export default function App() {
     loadAssets();
   }, []);
 
+  const getSectorName = (w: number) => {
+    if (w <= 5) return "Outer Rim";
+    if (w <= 10) return "Asteroid Belt";
+    if (w <= 15) return "Nebula Pass";
+    if (w <= 20) return "Fortress Gates";
+    return "The Core";
+  };
+
   // Initialize enemies
   const initEnemies = (waveNum: number) => {
     const newEnemies: Enemy[] = [];
     const isBossWave = waveNum % 5 === 0;
     const formationType = isBossWave ? 'BOSS' : waveNum % 4; // 1, 2, 3, 0
     
-    const createEnemy = (x: number, y: number, type: number): Enemy => ({
-      x, y, width: 35, height: 35, alive: true, type,
+    const createEnemy = (x: number, y: number, type: number, delay: number = 0, path?: {x: number, y: number}[]): Enemy => ({
+      x: path ? path[0].x : x, 
+      y: path ? path[0].y : y, 
+      width: 35, height: 35, alive: true, type,
       isDiving: false, isReturning: false, diveX: 0, diveY: 0,
       originX: x, originY: y, diveType: 'normal', turnY: 0,
-      diveTime: 0, diveStartX: 0, diveStartY: 0
+      diveTime: 0, diveStartX: 0, diveStartY: 0,
+      state: path ? 'ENTERING' : 'IN_FORMATION',
+      path: path,
+      pathIndex: 0,
+      entryDelay: delay
     });
 
     if (isBossWave) {
       const bossHealthVal = 1000 + (waveNum / 5) * 500;
+      const bossPath = [
+        { x: CANVAS_WIDTH / 2, y: -200 },
+        { x: CANVAS_WIDTH / 2, y: 80 }
+      ];
       newEnemies.push({
-        x: CANVAS_WIDTH / 2 - 60,
-        y: -150,
+        ...createEnemy(CANVAS_WIDTH / 2 - 60, 80, 0, 0, bossPath),
         width: 120,
         height: 100,
-        alive: true,
-        type: 0,
-        isDiving: false,
-        isReturning: false,
-        diveX: 0,
-        diveY: 0,
-        originX: CANVAS_WIDTH / 2 - 60,
-        originY: 80,
         isBoss: true,
         health: bossHealthVal,
         maxHealth: bossHealthVal,
@@ -252,28 +279,63 @@ export default function App() {
       setBossHealth({ current: bossHealthVal, max: bossHealthVal });
     } else {
       setBossHealth(null);
+      
+      // Define entry paths (Galaga style)
+      const paths = [
+        // Path 0: Loop from top left
+        Array.from({ length: 30 }, (_, i) => ({
+          x: -100 + i * 25,
+          y: 100 + Math.sin(i * 0.4) * 150
+        })),
+        // Path 1: Loop from top right
+        Array.from({ length: 30 }, (_, i) => ({
+          x: CANVAS_WIDTH + 100 - i * 25,
+          y: 150 + Math.cos(i * 0.4) * 180
+        })),
+        // Path 2: Swirl from bottom (Only for wave > 1)
+        Array.from({ length: 30 }, (_, i) => ({
+          x: CANVAS_WIDTH / 2 + Math.sin(i * 0.6) * 250,
+          y: CANVAS_HEIGHT + 100 - i * 35
+        }))
+      ];
+
+      // Wave 1 is always easier: only top entry
+      const availablePaths = waveNum === 1 ? [paths[0], paths[1]] : paths;
+
       if (formationType === 1) {
         // Grid
         for (let row = 0; row < ENEMY_ROWS; row++) {
           for (let col = 0; col < ENEMY_COLS; col++) {
             const x = col * ENEMY_SPACING + 80;
             const y = row * ENEMY_SPACING + 60;
-            newEnemies.push(createEnemy(x, y, row % 3));
+            const squadron = Math.floor((row * ENEMY_COLS + col) / 8);
+            const path = availablePaths[squadron % availablePaths.length];
+            const delay = (squadron * 1200) + ((row * ENEMY_COLS + col) % 8) * 150;
+            newEnemies.push(createEnemy(x, y, row % 3, delay, path));
           }
         }
       } else if (formationType === 2) {
         // V-shape
+        let count = 0;
         for (let row = 0; row < 5; row++) {
           for (let col = 0; col < 9; col++) {
             if (row === Math.abs(col - 4)) {
               const x = col * ENEMY_SPACING + 60;
               const y = row * ENEMY_SPACING + 60;
-              newEnemies.push(createEnemy(x, y, 1));
+              const squadron = Math.floor(count / 8);
+              const path = availablePaths[squadron % availablePaths.length];
+              const delay = (squadron * 1200) + (count % 8) * 150;
+              newEnemies.push(createEnemy(x, y, 1, delay, path));
+              count++;
             }
             if (row > 1 && row - 1 === Math.abs(col - 4)) {
               const x = col * ENEMY_SPACING + 60;
               const y = row * ENEMY_SPACING + 60;
-              newEnemies.push(createEnemy(x, y, 2));
+              const squadron = Math.floor(count / 8);
+              const path = availablePaths[squadron % availablePaths.length];
+              const delay = (squadron * 1200) + (count % 8) * 150;
+              newEnemies.push(createEnemy(x, y, 2, delay, path));
+              count++;
             }
           }
         }
@@ -287,22 +349,33 @@ export default function App() {
           const angle = (i / 20) * Math.PI * 2;
           const x = centerX + Math.cos(angle) * radiusX - 17.5;
           const y = centerY + Math.sin(angle) * radiusY - 17.5;
-          newEnemies.push(createEnemy(x, y, i % 3));
+          const squadron = Math.floor(i / 10);
+          const path = availablePaths[squadron % availablePaths.length];
+          const delay = (squadron * 1200) + (i % 10) * 150;
+          newEnemies.push(createEnemy(x, y, i % 3, delay, path));
         }
         for (let i = 0; i < 10; i++) {
           const angle = (i / 10) * Math.PI * 2;
           const x = centerX + Math.cos(angle) * (radiusX / 2) - 17.5;
           const y = centerY + Math.sin(angle) * (radiusY / 2) - 17.5;
-          newEnemies.push(createEnemy(x, y, 0));
+          const squadron = Math.floor((i + 20) / 10);
+          const path = availablePaths[squadron % availablePaths.length];
+          const delay = (squadron * 1200) + (i % 10) * 150;
+          newEnemies.push(createEnemy(x, y, 0, delay, path));
         }
       } else {
         // Checkerboard / U-Shape
+        let count = 0;
         for (let row = 0; row < 5; row++) {
           for (let col = 0; col < 9; col++) {
             if ((row + col) % 2 === 0) {
               const x = col * ENEMY_SPACING + 60;
               const y = row * ENEMY_SPACING + 60;
-              newEnemies.push(createEnemy(x, y, row % 3));
+              const squadron = Math.floor(count / 8);
+              const path = availablePaths[squadron % availablePaths.length];
+              const delay = (squadron * 1200) + (count % 8) * 150;
+              newEnemies.push(createEnemy(x, y, row % 3, delay, path));
+              count++;
             }
           }
         }
@@ -317,6 +390,8 @@ export default function App() {
     setScore(0);
     setLives(3);
     setWave(1);
+    setSectorName('Outer Rim');
+    setDistance(25000);
     livesRef.current = 3;
     waveRef.current = 1;
     invulnerableUntil.current = 0;
@@ -334,13 +409,13 @@ export default function App() {
   // Input handling
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyS', 'KeyA', 'KeyD'].includes(e.code)) {
         e.preventDefault();
       }
       keysPressed.current[e.code] = true;
     };
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyS', 'KeyA', 'KeyD'].includes(e.code)) {
         e.preventDefault();
       }
       keysPressed.current[e.code] = false;
@@ -359,12 +434,22 @@ export default function App() {
 
     // Player movement
     let isMoving = false;
-    if ((keysPressed.current['ArrowLeft'] || keysPressed.current['TouchLeft']) && playerPos.current.x > 0) {
-      playerPos.current.x -= PLAYER_SPEED;
+    const currentSpeed = isOverdriveActive.current ? PLAYER_SPEED * 1.5 : PLAYER_SPEED;
+
+    if ((keysPressed.current['ArrowLeft'] || keysPressed.current['KeyA'] || keysPressed.current['TouchLeft']) && playerPos.current.x > 0) {
+      playerPos.current.x -= currentSpeed;
       isMoving = true;
     }
-    if ((keysPressed.current['ArrowRight'] || keysPressed.current['TouchRight']) && playerPos.current.x < CANVAS_WIDTH - PLAYER_WIDTH) {
-      playerPos.current.x += PLAYER_SPEED;
+    if ((keysPressed.current['ArrowRight'] || keysPressed.current['KeyD'] || keysPressed.current['TouchRight']) && playerPos.current.x < CANVAS_WIDTH - PLAYER_WIDTH) {
+      playerPos.current.x += currentSpeed;
+      isMoving = true;
+    }
+    if ((keysPressed.current['ArrowUp'] || keysPressed.current['KeyW'] || keysPressed.current['TouchUp']) && playerPos.current.y > CANVAS_HEIGHT * 0.6) {
+      playerPos.current.y -= currentSpeed;
+      isMoving = true;
+    }
+    if ((keysPressed.current['ArrowDown'] || keysPressed.current['KeyS'] || keysPressed.current['TouchDown']) && playerPos.current.y < CANVAS_HEIGHT - PLAYER_HEIGHT - 20) {
+      playerPos.current.y += currentSpeed;
       isMoving = true;
     }
 
@@ -514,6 +599,32 @@ export default function App() {
     
     enemies.current.forEach((enemy) => {
       if (!enemy.alive) return;
+      
+      enemy.prevX = enemy.x;
+      enemy.prevY = enemy.y;
+
+      if (enemy.state === 'ENTERING') {
+        if (enemy.entryDelay! > 0) {
+          enemy.entryDelay! -= 16;
+          return;
+        }
+
+        const target = enemy.path![enemy.pathIndex!];
+        const dx = target.x - enemy.x;
+        const dy = target.y - enemy.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < 8) {
+          enemy.pathIndex!++;
+          if (enemy.pathIndex! >= enemy.path!.length) {
+            enemy.state = 'IN_FORMATION';
+          }
+        } else {
+          enemy.x += (dx / dist) * 8;
+          enemy.y += (dy / dist) * 8;
+        }
+        return;
+      }
 
       if (enemy.isBoss) {
         // Boss Logic
@@ -580,8 +691,10 @@ export default function App() {
       enemy.originY += 0.01 + (waveRef.current * 0.002);
 
       if (!enemy.isDiving && !enemy.isReturning) {
-        enemy.x = enemy.originX + formationOffset;
-        enemy.y = enemy.originY;
+        if (enemy.state === 'IN_FORMATION') {
+          enemy.x = enemy.originX + formationOffset;
+          enemy.y = enemy.originY;
+        }
       } else if (enemy.isDiving) {
         enemy.diveTime = (enemy.diveTime || 0) + 1;
         
@@ -631,10 +744,12 @@ export default function App() {
         if (enemy.diveType === 'uturn' && enemy.turnY && enemy.y > enemy.turnY) {
           enemy.isDiving = false;
           enemy.isReturning = true;
+          enemy.state = 'RETURNING';
         } else if (enemy.y > CANVAS_HEIGHT) {
           enemy.y = -40;
           enemy.isDiving = false;
           enemy.isReturning = true;
+          enemy.state = 'RETURNING';
         }
       } else if (enemy.isReturning) {
         const targetX = enemy.originX + formationOffset;
@@ -646,6 +761,7 @@ export default function App() {
         
         if (dist < currentEnemyDiveSpeed) {
           enemy.isReturning = false;
+          enemy.state = 'IN_FORMATION';
           enemy.x = targetX;
           enemy.y = targetY;
         } else {
@@ -659,7 +775,7 @@ export default function App() {
     const now = Date.now();
     const diveInterval = Math.max(1200, 3000 - waveRef.current * 200);
     if (now - lastDiveTime.current > diveInterval) {
-      const aliveEnemies = enemies.current.filter(e => e.alive && !e.isDiving && !e.isReturning);
+      const aliveEnemies = enemies.current.filter(e => e.alive && e.state === 'IN_FORMATION');
       if (aliveEnemies.length > 0) {
         // Pick a leader
         const leader = aliveEnemies[Math.floor(Math.random() * aliveEnemies.length)];
@@ -690,6 +806,7 @@ export default function App() {
         
         squad.forEach((diver, index) => {
           diver.isDiving = true;
+          diver.state = 'DIVING';
           diver.diveTime = -index * 15; // 15 frames delay for snake-like formation
           diver.diveStartX = diver.x;
           diver.diveStartY = diver.y;
@@ -852,6 +969,7 @@ export default function App() {
         activeEffects.current['SHIELD'] = 0; // Consume shield
         invulnerableUntil.current = Date.now() + 1000; // Brief invulnerability
         shake.current = 10;
+        glitch.current = 15;
         audio.playPlayerHit(); // Or a shield break sound
         return;
       }
@@ -861,6 +979,7 @@ export default function App() {
 
       audio.playPlayerHit();
       shake.current = 20;
+      glitch.current = 30;
       flash.current = 1;
       
       // Spawn player explosion particles
@@ -887,6 +1006,9 @@ export default function App() {
         setLives(livesRef.current);
         invulnerableUntil.current = Date.now() + 2000;
         enemyBullets.current = []; // Clear bullets to give a chance to recover
+        if (comboRef.current > 5) audio.playComboBreak();
+        comboRef.current = 0;
+        setCombo(0);
       } else {
         livesRef.current = 0;
         setLives(0);
@@ -912,6 +1034,7 @@ export default function App() {
     if (aliveEnemies.length === 0 && !isWarping.current) {
       isWarping.current = true;
       warpStartTime.current = Date.now();
+      audio.playWaveClear();
       audio.playWarp();
       
       // Clear bullets
@@ -921,6 +1044,8 @@ export default function App() {
       setTimeout(() => {
         waveRef.current += 1;
         setWave(waveRef.current);
+        setSectorName(getSectorName(waveRef.current));
+        setDistance(prev => Math.max(0, prev - 1000));
         initEnemies(waveRef.current);
         
         // Wave title effect
@@ -939,6 +1064,7 @@ export default function App() {
       const elapsed = Date.now() - warpStartTime.current;
       if (elapsed < 1500) {
         warpFactor.current = Math.min(1, warpFactor.current + 0.05);
+        glitch.current = Math.max(glitch.current, warpFactor.current * 10);
       } else {
         warpFactor.current = Math.max(0, warpFactor.current - 0.02);
       }
@@ -946,13 +1072,21 @@ export default function App() {
       warpFactor.current = Math.max(0, warpFactor.current - 0.05);
     }
 
-    if (aliveEnemies.some(e => e.y + e.height > CANVAS_HEIGHT && !e.isDiving && !e.isReturning)) {
+    // Decay effects
+    if (glitch.current > 0) glitch.current *= 0.9;
+    if (shake.current > 0) shake.current *= 0.9;
+    if (flash.current > 0) flash.current *= 0.9;
+
+    if (aliveEnemies.some(e => e.y + e.height > CANVAS_HEIGHT && e.state === 'IN_FORMATION')) {
       setGameState('GAME_OVER');
     }
   };
 
-  const draw = (ctx: CanvasRenderingContext2D) => {
-    // Clear with slight trail effect
+  const draw = (mainCtx: CanvasRenderingContext2D) => {
+    const ctx = offscreenCtx.current;
+    if (!ctx || !offscreenCanvas.current) return;
+
+    // Clear offscreen
     ctx.fillStyle = 'rgba(2, 2, 5, 0.3)';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
@@ -963,7 +1097,6 @@ export default function App() {
       const dx = (Math.random() - 0.5) * shake.current;
       const dy = (Math.random() - 0.5) * shake.current;
       ctx.translate(dx, dy);
-      shake.current *= 0.9;
     }
 
     // Parallax Starfield
@@ -1191,11 +1324,23 @@ export default function App() {
         return;
       }
 
-      // Rotation for diving/returning
-      if (enemy.isDiving || enemy.isReturning) {
-        const angle = Math.atan2(enemy.y - (enemy.y - 1), enemy.x - (enemy.x - (enemy.diveX || 0)));
-        ctx.rotate(angle + Math.PI/2);
+      // Rotation for diving/returning/entering
+      let angle = Math.PI; // Default: point down towards player
+      if (enemy.state === 'ENTERING' || enemy.isDiving || enemy.isReturning) {
+        const dx = enemy.x - (enemy.prevX ?? enemy.x);
+        const dy = enemy.y - (enemy.prevY ?? enemy.y);
+        
+        if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
+          angle = Math.atan2(dy, dx) + Math.PI / 2;
+        } else if (enemy.state === 'ENTERING') {
+          const target = enemy.path![Math.min(enemy.pathIndex!, enemy.path!.length - 1)];
+          angle = Math.atan2(target.y - enemy.y, target.x - enemy.x) + Math.PI / 2;
+        } else if (enemy.isDiving) {
+          // Point towards player if just starting dive
+          angle = Math.atan2(playerPos.current.y - enemy.y, playerPos.current.x - enemy.x) + Math.PI / 2;
+        }
       }
+      ctx.rotate(angle);
 
       const colors = ['#ffcc00', '#ff33cc', '#33ccff'];
       const color = colors[enemy.type];
@@ -1297,7 +1442,6 @@ export default function App() {
     if (flash.current > 0) {
       ctx.fillStyle = `rgba(255, 255, 255, ${flash.current * 0.3})`;
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      flash.current *= 0.9;
     }
 
     // Speed Lines Overlay (Warp)
@@ -1314,6 +1458,59 @@ export default function App() {
         ctx.stroke();
       }
       ctx.restore();
+    }
+
+    // Final Post-Processing to Main Canvas
+    mainCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    
+    // Chromatic Aberration
+    const caIntensity = (isOverdriveActive.current ? 4 : 0) + (warpFactor.current * 15) + (glitch.current * 0.5);
+    if (caIntensity > 0.5) {
+      mainCtx.globalCompositeOperation = 'screen';
+      // Red
+      mainCtx.drawImage(offscreenCanvas.current, -caIntensity, 0);
+      // Green (center)
+      mainCtx.drawImage(offscreenCanvas.current, 0, 0);
+      // Blue
+      mainCtx.drawImage(offscreenCanvas.current, caIntensity, 0);
+      mainCtx.globalCompositeOperation = 'source-over';
+    } else {
+      mainCtx.drawImage(offscreenCanvas.current, 0, 0);
+    }
+
+    // Glitch Effect
+    if (glitch.current > 1) {
+      const glitchAmount = glitch.current;
+      for (let i = 0; i < 5; i++) {
+        const x = Math.random() * CANVAS_WIDTH;
+        const y = Math.random() * CANVAS_HEIGHT;
+        const w = Math.random() * 100 + 50;
+        const h = Math.random() * 20 + 5;
+        const dx = (Math.random() - 0.5) * glitchAmount * 2;
+        mainCtx.drawImage(offscreenCanvas.current, x, y, w, h, x + dx, y, w, h);
+      }
+    }
+
+    // Scanlines
+    mainCtx.fillStyle = 'rgba(18, 16, 16, 0.1)';
+    for (let i = 0; i < CANVAS_HEIGHT; i += 4) {
+      mainCtx.fillRect(0, i, CANVAS_WIDTH, 1);
+    }
+
+    // Vignette
+    const gradient = mainCtx.createRadialGradient(
+      CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_WIDTH / 4,
+      CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_WIDTH / 1.2
+    );
+    gradient.addColorStop(0, 'rgba(0,0,0,0)');
+    gradient.addColorStop(1, 'rgba(0,0,0,0.4)');
+    mainCtx.fillStyle = gradient;
+    mainCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Static Noise
+    if (Math.random() > 0.9) {
+      mainCtx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.02})`;
+      mainCtx.fillRect(Math.random() * CANVAS_WIDTH, Math.random() * CANVAS_HEIGHT, 2, 2);
     }
   };
 
@@ -1346,19 +1543,40 @@ export default function App() {
       {/* HUD */}
       <div className="w-full max-w-[600px] flex justify-between items-end mb-4 px-4">
         <div className="flex flex-col">
+          <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em]">Sector</span>
+          <span className="text-xl font-bold text-white tracking-tighter italic">{sectorName}</span>
+          <div className="flex flex-col mt-2">
+            <span className="text-[8px] text-gray-500 uppercase tracking-widest">Distance to Fortress</span>
+            <div className="w-32 h-1 bg-white/10 rounded-full mt-1 overflow-hidden">
+              <motion.div 
+                animate={{ width: `${(1 - distance / 25000) * 100}%` }}
+                className="h-full bg-[#00ffcc] shadow-[0_0_5px_#00ffcc]"
+              />
+            </div>
+            <span className="text-[9px] text-[#00ffcc] mt-1 font-mono">{distance.toLocaleString()} KM</span>
+          </div>
+        </div>
+        
+        <div className="flex flex-col items-center">
           <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em]">Score</span>
           <span className="text-2xl font-bold text-[#00ffcc] tracking-tighter">{score.toString().padStart(6, '0')}</span>
         </div>
         
         {combo > 1 && (
           <motion.div 
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
+            initial={{ scale: 0, opacity: 0, rotate: -20 }}
+            animate={{ 
+              scale: [1, 1.2, 1], 
+              opacity: 1, 
+              rotate: [0, 5, -5, 0],
+              color: combo > 10 ? '#ffcc00' : '#ff3366'
+            }}
+            transition={{ duration: 0.2 }}
             key={combo}
             className="flex flex-col items-center"
           >
-            <span className="text-[10px] text-[#ff3366] font-bold uppercase tracking-widest">Combo</span>
-            <span className="text-3xl font-black text-[#ff3366] italic">x{combo}</span>
+            <span className="text-[10px] uppercase tracking-widest font-bold opacity-70">Combo</span>
+            <span className={`text-4xl font-black italic drop-shadow-[0_0_10px_currentColor]`}>x{combo}</span>
           </motion.div>
         )}
 
@@ -1444,16 +1662,63 @@ export default function App() {
         <AnimatePresence>
           {waveTitle && (
             <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="absolute inset-0 flex items-center justify-center pointer-events-none"
+              initial={{ opacity: 0, scale: 0.8, rotateX: 45 }}
+              animate={{ opacity: 1, scale: 1, rotateX: 0 }}
+              exit={{ opacity: 0, scale: 1.2, rotateX: -45 }}
+              className="absolute inset-0 flex items-center justify-center pointer-events-none z-50"
             >
-              <div className="text-center">
-                <h2 className={`text-5xl md:text-6xl font-black tracking-[0.2em] italic drop-shadow-[0_0_20px_rgba(255,255,255,0.5)] ${wave % 5 === 0 ? 'text-[#ff3366]' : 'text-white'}`}>
-                  {wave % 5 === 0 ? 'BOSS BATTLE' : `WAVE ${wave}`}
-                </h2>
-                <div className={`h-1 w-full mt-2 shadow-[0_0_10px_currentColor] ${wave % 5 === 0 ? 'bg-[#ff3366] text-[#ff3366]' : 'bg-[#00ffcc] text-[#00ffcc]'}`} />
+              <div className="text-center relative">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: '100%' }}
+                  transition={{ duration: 0.5, delay: 0.2 }}
+                  className="absolute -top-6 left-0 h-[2px] bg-gradient-to-r from-transparent via-[#00ffcc] to-transparent"
+                />
+                <div className="relative">
+                  <h2 className={`text-5xl md:text-7xl font-black tracking-[0.3em] italic drop-shadow-[0_0_30px_rgba(255,255,255,0.8)] ${wave % 5 === 0 ? 'text-[#ff3366]' : 'text-white'}`}>
+                    {wave % 5 === 0 ? 'BOSS BATTLE' : `SECTOR ${wave.toString().padStart(2, '0')}`}
+                  </h2>
+                  <p className="text-[#00ffcc] text-xs mt-2 tracking-[0.5em] font-bold uppercase">{sectorName}</p>
+                  {/* Glitch clones for stylish effect */}
+                  <motion.h2 
+                    animate={{ x: [-2, 2, -2], opacity: [0.3, 0.1, 0.3] }}
+                    transition={{ duration: 0.1, repeat: Infinity }}
+                    className="absolute inset-0 text-5xl md:text-7xl font-black tracking-[0.3em] italic text-[#00ffcc] -z-10 translate-x-1"
+                  >
+                    {wave % 5 === 0 ? 'BOSS BATTLE' : `SECTOR ${wave.toString().padStart(2, '0')}`}
+                  </motion.h2>
+                  <motion.h2 
+                    animate={{ x: [2, -2, 2], opacity: [0.3, 0.1, 0.3] }}
+                    transition={{ duration: 0.1, repeat: Infinity }}
+                    className="absolute inset-0 text-5xl md:text-7xl font-black tracking-[0.3em] italic text-[#ff3366] -z-10 -translate-x-1"
+                  >
+                    {wave % 5 === 0 ? 'BOSS BATTLE' : `SECTOR ${wave.toString().padStart(2, '0')}`}
+                  </motion.h2>
+                </div>
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: '100%' }}
+                  transition={{ duration: 0.5, delay: 0.2 }}
+                  className="absolute -bottom-6 left-0 h-[2px] bg-gradient-to-r from-transparent via-[#ff3366] to-transparent"
+                />
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.5 }}
+                  className="mt-12 flex flex-col items-center gap-2"
+                >
+                  <span className="text-[10px] uppercase tracking-[0.5em] text-gray-400 font-bold">System Status: Optimal</span>
+                  <div className="flex gap-1">
+                    {[...Array(5)].map((_, i) => (
+                      <motion.div 
+                        key={i}
+                        animate={{ opacity: [0.2, 1, 0.2] }}
+                        transition={{ duration: 1, delay: i * 0.1, repeat: Infinity }}
+                        className="w-1 h-1 bg-[#00ffcc]"
+                      />
+                    ))}
+                  </div>
+                </motion.div>
               </div>
             </motion.div>
           )}
@@ -1537,27 +1802,49 @@ export default function App() {
       {/* Mobile Control Pad (Outside Canvas) */}
       {gameState === 'PLAYING' && isTouchDevice && (
         <div className="w-full max-w-[700px] mt-8 px-4 flex justify-between items-center select-none">
-          {/* Movement Group */}
-          <div className="flex gap-4 md:gap-6">
+          {/* Movement Group - D-Pad Layout */}
+          <div className="relative w-40 h-40 md:w-48 md:h-48 flex items-center justify-center">
+            {/* Up */}
+            <button
+              onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchUp'] = true; }}
+              onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchUp'] = false; }}
+              onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchUp'] = false; }}
+              className="absolute top-0 w-14 h-14 md:w-16 md:h-16 bg-[#1a1a2e] border-2 border-[#00ffcc]/40 rounded-xl flex items-center justify-center active:bg-[#00ffcc]/20 active:scale-95 transition-all touch-none shadow-[0_4px_0_rgba(0,255,204,0.2)]"
+            >
+              <div className="w-0 h-0 border-l-[10px] border-l-transparent border-r-[10px] border-r-transparent border-b-[20px] border-b-[#00ffcc]" />
+            </button>
+            {/* Down */}
+            <button
+              onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchDown'] = true; }}
+              onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchDown'] = false; }}
+              onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchDown'] = false; }}
+              className="absolute bottom-0 w-14 h-14 md:w-16 md:h-16 bg-[#1a1a2e] border-2 border-[#00ffcc]/40 rounded-xl flex items-center justify-center active:bg-[#00ffcc]/20 active:scale-95 transition-all touch-none shadow-[0_4px_0_rgba(0,255,204,0.2)]"
+            >
+              <div className="w-0 h-0 border-l-[10px] border-l-transparent border-r-[10px] border-r-transparent border-t-[20px] border-t-[#00ffcc]" />
+            </button>
+            {/* Left */}
             <button
               onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchLeft'] = true; }}
               onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchLeft'] = false; }}
               onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchLeft'] = false; }}
-              className="w-16 h-16 md:w-20 md:h-20 bg-[#1a1a2e] border-2 border-[#00ffcc]/40 rounded-2xl flex items-center justify-center active:bg-[#00ffcc]/20 active:scale-95 transition-all touch-none shadow-[0_4px_0_rgba(0,255,204,0.2)] active:translate-y-1 active:shadow-none"
+              className="absolute left-0 w-14 h-14 md:w-16 md:h-16 bg-[#1a1a2e] border-2 border-[#00ffcc]/40 rounded-xl flex items-center justify-center active:bg-[#00ffcc]/20 active:scale-95 transition-all touch-none shadow-[0_4px_0_rgba(0,255,204,0.2)]"
             >
-              <div className="w-0 h-0 border-t-[10px] border-t-transparent border-r-[20px] border-r-[#00ffcc] border-b-[10px] border-b-transparent md:border-t-[12px] md:border-r-[24px] md:border-b-[12px]" />
+              <div className="w-0 h-0 border-t-[10px] border-t-transparent border-b-[10px] border-b-transparent border-r-[20px] border-r-[#00ffcc]" />
             </button>
+            {/* Right */}
             <button
               onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchRight'] = true; }}
               onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchRight'] = false; }}
               onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchRight'] = false; }}
-              className="w-16 h-16 md:w-20 md:h-20 bg-[#1a1a2e] border-2 border-[#00ffcc]/40 rounded-2xl flex items-center justify-center active:bg-[#00ffcc]/20 active:scale-95 transition-all touch-none shadow-[0_4px_0_rgba(0,255,204,0.2)] active:translate-y-1 active:shadow-none"
+              className="absolute right-0 w-14 h-14 md:w-16 md:h-16 bg-[#1a1a2e] border-2 border-[#00ffcc]/40 rounded-xl flex items-center justify-center active:bg-[#00ffcc]/20 active:scale-95 transition-all touch-none shadow-[0_4px_0_rgba(0,255,204,0.2)]"
             >
-              <div className="w-0 h-0 border-t-[10px] border-t-transparent border-l-[20px] border-l-[#00ffcc] border-b-[10px] border-b-transparent md:border-t-[12px] md:border-l-[24px] md:border-b-[12px]" />
+              <div className="w-0 h-0 border-t-[10px] border-t-transparent border-b-[10px] border-b-transparent border-l-[20px] border-l-[#00ffcc]" />
             </button>
+            {/* Center decoration */}
+            <div className="w-8 h-8 bg-[#00ffcc]/10 rounded-full border border-[#00ffcc]/20" />
           </div>
           
-          {/* Overdrive Button (Centered with more space) */}
+          {/* Overdrive Button */}
           <button
             onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchOverdrive'] = true; }}
             onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchOverdrive'] = false; }}
