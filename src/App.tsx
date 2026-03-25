@@ -139,6 +139,18 @@ interface Asteroid {
   hp: number;
 }
 
+interface Obstacle {
+  id: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  type: 'BUILDING' | 'WALL' | 'PILLAR';
+  hp: number;
+  maxHp: number;
+  color: string;
+}
+
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [gameState, setGameState] = useState<GameState>('LOADING');
@@ -195,6 +207,9 @@ export default function App() {
   const isWarping = useRef(false);
   const scraps = useRef<Scrap[]>([]);
   const asteroids = useRef<Asteroid[]>([]);
+  const obstacles = useRef<Obstacle[]>([]);
+  const lastObstacleTime = useRef(0);
+  const obstaclePattern = useRef(0);
   const warpFactor = useRef(0);
   const warpStartTime = useRef(0);
 
@@ -525,6 +540,8 @@ export default function App() {
     trails.current = [];
     scraps.current = [];
     asteroids.current = [];
+    obstacles.current = [];
+    lastObstacleTime.current = 0;
     shake.current = 0;
     flash.current = 0;
     initEnemies(1);
@@ -682,6 +699,61 @@ export default function App() {
       });
     });
     asteroids.current = asteroids.current.filter(a => a.y < CANVAS_HEIGHT + 100 && a.hp > 0);
+
+    // Update Obstacles (Sector 16+: Fortress Gates & The Core)
+    if ((sectorName === 'Fortress Gates' || sectorName === 'The Core') && !isWarping.current) {
+      const now = Date.now();
+      if (now - lastObstacleTime.current > 3000) {
+        lastObstacleTime.current = now;
+        obstaclePattern.current = (obstaclePattern.current + 1) % 4;
+        
+        // Generate pattern
+        if (obstaclePattern.current === 0) {
+          // Left wall
+          obstacles.current.push({ id: now, x: 0, y: -200, width: 200, height: 150, type: 'WALL', hp: 50, maxHp: 50, color: '#ff3366' });
+          // Right wall
+          obstacles.current.push({ id: now + 1, x: CANVAS_WIDTH - 200, y: -200, width: 200, height: 150, type: 'WALL', hp: 50, maxHp: 50, color: '#ff3366' });
+        } else if (obstaclePattern.current === 1) {
+          // Center pillar
+          obstacles.current.push({ id: now, x: CANVAS_WIDTH / 2 - 100, y: -200, width: 200, height: 200, type: 'BUILDING', hp: 100, maxHp: 100, color: '#33ccff' });
+        } else if (obstaclePattern.current === 2) {
+          // Zigzag
+          obstacles.current.push({ id: now, x: 100, y: -200, width: 150, height: 150, type: 'PILLAR', hp: 30, maxHp: 30, color: '#ffcc00' });
+          obstacles.current.push({ id: now + 1, x: CANVAS_WIDTH - 250, y: -400, width: 150, height: 150, type: 'PILLAR', hp: 30, maxHp: 30, color: '#ffcc00' });
+        } else {
+          // Narrow corridor
+          obstacles.current.push({ id: now, x: 0, y: -200, width: CANVAS_WIDTH / 2 - 60, height: 300, type: 'WALL', hp: 200, maxHp: 200, color: '#ff3366' });
+          obstacles.current.push({ id: now + 1, x: CANVAS_WIDTH / 2 + 60, y: -200, width: CANVAS_WIDTH / 2 - 60, height: 300, type: 'WALL', hp: 200, maxHp: 200, color: '#ff3366' });
+        }
+      }
+    }
+
+    obstacles.current.forEach(obs => {
+      obs.y += 2; // Scroll down
+      
+      // Collision with player
+      const px = playerPos.current.x;
+      const py = playerPos.current.y;
+      if (px + PLAYER_WIDTH > obs.x && px < obs.x + obs.width &&
+          py + PLAYER_HEIGHT > obs.y && py < obs.y + obs.height && Date.now() > invulnerableUntil.current) {
+        handlePlayerHit();
+      }
+      
+      // Collision with bullets
+      bullets.current.forEach(b => {
+        if (b.x > obs.x && b.x < obs.x + obs.width &&
+            b.y > obs.y && b.y < obs.y + obs.height) {
+          obs.hp -= (b.damage || 1);
+          b.y = -100; // Remove bullet
+          if (obs.hp <= 0) {
+            audio.playExplosion(obs.x + obs.width / 2);
+            createExplosion(obs.x + obs.width / 2, obs.y + obs.height / 2, obs.color, 20);
+            setScore(s => s + 200);
+          }
+        }
+      });
+    });
+    obstacles.current = obstacles.current.filter(obs => obs.y < CANVAS_HEIGHT + 400 && obs.hp > 0);
 
     // Overdrive Logic
     if (isOverdriveActive.current) {
@@ -1297,6 +1369,7 @@ export default function App() {
       bullets.current = [];
       enemyBullets.current = [];
       asteroids.current = [];
+      obstacles.current = [];
 
       setTimeout(() => {
         // Show Upgrade Choice
@@ -1477,6 +1550,64 @@ export default function App() {
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       ctx.restore();
     }
+
+    // Draw Obstacles
+    obstacles.current.forEach(obs => {
+      ctx.save();
+      ctx.translate(obs.x, obs.y);
+      
+      const color = obs.color;
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = color;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      
+      // Outer border
+      ctx.strokeRect(0, 0, obs.width, obs.height);
+      
+      // Inner details based on type
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.3;
+      if (obs.type === 'WALL') {
+        // Diagonal lines
+        for (let i = 0; i < obs.width + obs.height; i += 20) {
+          ctx.beginPath();
+          ctx.moveTo(Math.max(0, i - obs.height), Math.min(i, obs.height));
+          ctx.lineTo(Math.min(i, obs.width), Math.max(0, i - obs.width));
+          ctx.stroke();
+        }
+      } else if (obs.type === 'BUILDING') {
+        // Grid pattern
+        for (let x = 20; x < obs.width; x += 20) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, obs.height);
+          ctx.stroke();
+        }
+        for (let y = 20; y < obs.height; y += 20) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(obs.width, y);
+          ctx.stroke();
+        }
+      } else {
+        // Concentric squares
+        for (let i = 10; i < Math.min(obs.width, obs.height) / 2; i += 10) {
+          ctx.strokeRect(i, i, obs.width - i * 2, obs.height - i * 2);
+        }
+      }
+      
+      // Health bar (only if damaged)
+      if (obs.hp < obs.maxHp) {
+        ctx.globalAlpha = 1.0;
+        ctx.fillStyle = '#333';
+        ctx.fillRect(5, -10, obs.width - 10, 4);
+        ctx.fillStyle = color;
+        ctx.fillRect(5, -10, (obs.width - 10) * (obs.hp / obs.maxHp), 4);
+      }
+      
+      ctx.restore();
+    });
 
     // Player
     const isInvulnerable = Date.now() < invulnerableUntil.current;
