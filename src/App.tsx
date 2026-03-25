@@ -355,6 +355,7 @@ export default function App() {
       livesRef.current = newLives;
       if (newLives <= 0) {
         setGameState('GAME_OVER');
+        setBossHealth(null);
         audio.playGameOver();
       } else {
         audio.playPlayerHit();
@@ -371,8 +372,8 @@ export default function App() {
   // Initialize enemies
   const initEnemies = (waveNum: number) => {
     const newEnemies: Enemy[] = [];
-    const stage = Math.min(5, Math.ceil(waveNum / 3));
-    const isBossWave = waveNum % 3 === 0;
+    const stage = Math.min(5, Math.ceil(waveNum / 2));
+    const isBossWave = waveNum === 6 || waveNum === 10;
     
     const createEnemy = (x: number, y: number, type: number, delay: number = 0, path?: {x: number, y: number}[]): Enemy => ({
       x: path ? path[0].x : x, 
@@ -389,74 +390,62 @@ export default function App() {
 
     if (isBossWave) {
       audio.playBossWarning();
-      if (stage === 1) {
-        // Stage 1 Boss: Alpha Scout
+      if (waveNum === 6) {
+        // Mid-Boss: Alpha Scout (Upgraded)
         const boss: Enemy = {
           ...createEnemy(CANVAS_WIDTH / 2 - 50, 80, 0),
-          width: 100, height: 80, isBoss: true, health: 800, maxHealth: 800,
+          width: 100, height: 80, isBoss: true, health: 1000, maxHealth: 1000,
           phase: 1, moveDir: 1, lastShotTime: 0
         };
         newEnemies.push(boss);
-        setBossHealth({ current: 800, max: 800 });
-      } else if (stage === 2) {
-        // Stage 2 Boss: Asteroid Mother
-        const boss: Enemy = {
-          ...createEnemy(CANVAS_WIDTH / 2 - 60, 80, 3), // Type 3 for Asteroid Mother
-          width: 120, height: 120, isBoss: true, health: 1500, maxHealth: 1500,
-          phase: 1, moveDir: 1, lastShotTime: 0
-        };
-        newEnemies.push(boss);
-        setBossHealth({ current: 1500, max: 1500 });
-      } else if (stage === 3) {
-        // Stage 3 Boss: Sniper Carrier
-        const boss: Enemy = {
-          ...createEnemy(CANVAS_WIDTH / 2 - 70, 80, 1),
-          width: 140, height: 100, isBoss: true, health: 2500, maxHealth: 2500,
-          phase: 1, moveDir: 1, lastShotTime: 0
-        };
-        newEnemies.push(boss);
-        setBossHealth({ current: 2500, max: 2500 });
-      } else if (stage === 4) {
-        // Stage 4 Boss: Speed Demon
-        const boss: Enemy = {
-          ...createEnemy(CANVAS_WIDTH / 2 - 50, 80, 2),
-          width: 100, height: 120, isBoss: true, health: 3500, maxHealth: 3500,
-          phase: 1, moveDir: 1, lastShotTime: 0
-        };
-        newEnemies.push(boss);
-        setBossHealth({ current: 3500, max: 3500 });
-      } else if (stage === 5) {
-        // Stage 5 Boss: The Core
+        setBossHealth({ current: 1000, max: 1000 });
+      } else if (waveNum === 10) {
+        // Final Boss: The Core
         const boss: Enemy = {
           ...createEnemy(CANVAS_WIDTH / 2 - 90, 80, 2),
-          width: 180, height: 150, isBoss: true, isFinalBoss: true, health: 6000, maxHealth: 6000,
+          width: 180, height: 150, isBoss: true, isFinalBoss: true, health: 5000, maxHealth: 5000,
           phase: 1, moveDir: 1, lastShotTime: 0
         };
         newEnemies.push(boss);
-        setBossHealth({ current: 6000, max: 6000 });
+        setBossHealth({ current: 5000, max: 5000 });
       }
     } else {
       // Normal Waves
       if (stage === 1) {
-        for (let i = 0; i < 10 + (waveNum % 3) * 5; i++) {
+        // Tutorial: Scouts only
+        for (let i = 0; i < 10 + (waveNum % 2) * 5; i++) {
           newEnemies.push(createEnemy(80 + (i % 5) * 100, 60 + Math.floor(i / 5) * 80, 0));
         }
       } else if (stage === 2) {
-        // Asteroid Belt: Mix of asteroids and scouts
-        for (let i = 0; i < 8; i++) {
+        // Asteroid Belt: Scouts
+        for (let i = 0; i < 12; i++) {
           newEnemies.push(createEnemy(100 + (i % 4) * 120, 60 + Math.floor(i / 4) * 80, 0));
         }
       } else if (stage === 3) {
-        for (let i = 0; i < 15; i++) {
+        // Heavy Fire: Snipers + Turrets
+        for (let i = 0; i < 10; i++) {
           newEnemies.push(createEnemy(50 + (i % 5) * 120, 60 + Math.floor(i / 5) * 60, 1));
         }
+        // Add some turrets
+        for (let i = 0; i < 3; i++) {
+          const turret = createEnemy(100 + i * 150, 200, 1);
+          turret.isTurret = true;
+          turret.width = 50;
+          turret.height = 50;
+          turret.health = 50;
+          newEnemies.push(turret);
+        }
       } else if (stage === 4) {
-        for (let i = 0; i < 20; i++) {
+        // Chase: Fast scouts
+        for (let i = 0; i < 15; i++) {
           const x = Math.random() * CANVAS_WIDTH;
           const y = -Math.random() * 500;
-          newEnemies.push(createEnemy(x, y, 2));
+          const enemy = createEnemy(x, y, 2);
+          enemy.state = 'DIVING'; // Always diving in chase
+          newEnemies.push(enemy);
         }
       } else if (stage === 5) {
+        // Final Front: Mixed
         for (let i = 0; i < 20; i++) {
           newEnemies.push(createEnemy(50 + (i % 5) * 120, 60 + Math.floor(i / 5) * 60, i % 3));
         }
@@ -488,8 +477,8 @@ export default function App() {
     waveRef.current += 1;
     setWave(waveRef.current);
     
-    const stage = Math.min(5, Math.ceil(waveRef.current / 3));
-    const sector = ((waveRef.current - 1) % 3) + 1;
+    const stage = Math.min(5, Math.ceil(waveRef.current / 2));
+    const sector = ((waveRef.current - 1) % 2) + 1;
     const stageNames = ["Tutorial", "Asteroid Belt", "Heavy Fire", "Chase", "Final Front"];
     setSectorName(`${stageNames[stage - 1]} - SECTOR ${sector}`);
     
@@ -515,6 +504,7 @@ export default function App() {
     setDistance(25000);
     setScrapCount(0);
     setShowUpgrade(false);
+    setBossHealth(null);
     firepowerRef.current = 1;
     speedRef.current = 1;
     magnetRef.current = 1;
@@ -813,8 +803,9 @@ export default function App() {
     });
     scraps.current = scraps.current.filter(s => s.y < CANVAS_HEIGHT && s.life > 0);
 
-    // Update Asteroids (Sector 6-10: Asteroid Belt)
-    if (sectorName === 'Asteroid Belt' && !isWarping.current && Math.random() < 0.02) {
+    // Update Asteroids
+    const isAsteroidBelt = sectorName.includes('Asteroid Belt');
+    if (isAsteroidBelt && !isWarping.current && Math.random() < 0.02) {
       asteroids.current.push({
         x: Math.random() * CANVAS_WIDTH,
         y: -100,
@@ -822,7 +813,7 @@ export default function App() {
         speed: Math.random() * 2 + 1,
         rotation: Math.random() * Math.PI * 2,
         vr: (Math.random() - 0.5) * 0.05,
-        hp: 3
+        hp: isAsteroidBelt ? 9999 : 3 // Indestructible in belt
       });
     }
     
@@ -836,7 +827,7 @@ export default function App() {
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < a.size * 0.8 && Date.now() > invulnerableUntil.current) {
         handlePlayerHit();
-        a.hp = 0; // Destroy asteroid
+        if (!isAsteroidBelt) a.hp = 0; // Destroy asteroid if not in belt
       }
       
       // Collision with bullets
@@ -845,9 +836,9 @@ export default function App() {
         const bdy = b.y - a.y;
         const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
         if (bdist < a.size) {
-          a.hp -= (b.damage || 1);
+          if (!isAsteroidBelt) a.hp -= (b.damage || 1);
           b.y = -100; // Remove bullet
-          if (a.hp <= 0) {
+          if (a.hp <= 0 && !isAsteroidBelt) {
             audio.playExplosion(a.x);
             createExplosion(a.x, a.y, '#888888', 10);
             setScore(s => s + 50);
@@ -1677,8 +1668,9 @@ export default function App() {
     }
 
     // Parallax Starfield
+    const isChase = sectorName.includes('Chase');
     stars.current.forEach(s => {
-      const speedMult = 1 + warpFactor.current * 40;
+      const speedMult = (1 + warpFactor.current * 40) * (isChase ? 3 : 1);
       s.y += s.speed * speedMult;
       if (s.y > CANVAS_HEIGHT) {
         s.y = -10;
@@ -1686,13 +1678,14 @@ export default function App() {
       }
       ctx.fillStyle = `rgba(255, 255, 255, ${s.opacity})`;
       
-      if (warpFactor.current > 0.1) {
-        // Stretched stars during warp
-        ctx.strokeStyle = `rgba(255, 255, 255, ${s.opacity * warpFactor.current})`;
+      if (warpFactor.current > 0.1 || isChase) {
+        // Stretched stars during warp or chase
+        const stretch = warpFactor.current > 0.1 ? 20 * warpFactor.current : 5;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${s.opacity * (warpFactor.current > 0.1 ? warpFactor.current : 0.5)})`;
         ctx.lineWidth = s.size;
         ctx.beginPath();
         ctx.moveTo(s.x, s.y);
-        ctx.lineTo(s.x, s.y - s.size * 20 * warpFactor.current);
+        ctx.lineTo(s.x, s.y - s.size * stretch);
         ctx.stroke();
       } else {
         ctx.beginPath();
@@ -1702,8 +1695,8 @@ export default function App() {
     });
 
     // Grid (Perspective effect)
-    const isBossNear = (waveRef.current + 1) % 5 === 0;
-    const isBossWave = waveRef.current % 5 === 0;
+    const isBossNear = waveRef.current === 5 || waveRef.current === 9;
+    const isBossWave = waveRef.current === 6 || waveRef.current === 10;
     
     let baseGridColor = 'rgba(0, 255, 204, 0.05)';
     if (isBossWave) baseGridColor = 'rgba(255, 51, 102, 0.1)';
