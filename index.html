@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Google AI Studio App</title>
+    <script>
+      // Intercept Vite's WebSocket to prevent automatic page reloads
+      const OriginalWebSocket = window.WebSocket;
+      window.WebSocket = function(url, protocols) {
+        const ws = new OriginalWebSocket(url, protocols);
+        if (url.includes('vite')) {
+          const originalAddEventListener = ws.addEventListener.bind(ws);
+          ws.addEventListener = function(type, listener, options) {
+            if (type === 'message' || type === 'close') {
+              console.log('Blocked Vite WebSocket event:', type);
+              return;
+            }
+            return originalAddEventListener(type, listener, options);
+          };
+        }
+        return ws;
+      };
+      window.WebSocket.prototype = OriginalWebSocket.prototype;
+      window.WebSocket.CONNECTING = OriginalWebSocket.CONNECTING;
+      window.WebSocket.OPEN = OriginalWebSocket.OPEN;
+      window.WebSocket.CLOSING = OriginalWebSocket.CLOSING;
+      window.WebSocket.CLOSED = OriginalWebSocket.CLOSED;
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
