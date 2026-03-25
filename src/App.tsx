@@ -674,6 +674,7 @@ export default function App() {
           a.hp -= (b.damage || 1);
           b.y = -100; // Remove bullet
           if (a.hp <= 0) {
+            audio.playExplosion(a.x);
             createExplosion(a.x, a.y, '#888888', 10);
             setScore(s => s + 50);
           }
@@ -699,7 +700,7 @@ export default function App() {
           overdriveEndTime.current = Date.now() + 10000; // 10 seconds
           shake.current = 30;
           flash.current = 0.5;
-          audio.playOverdrive?.(); // Optional sound
+          audio.playOverdrive();
         }
       }
     }
@@ -746,7 +747,7 @@ export default function App() {
             size: bulletSize
           });
         }
-        audio.playShoot();
+        audio.playShoot(playerPos.current.x + PLAYER_WIDTH / 2);
         lastShotTime.current = now;
       }
     }
@@ -792,7 +793,7 @@ export default function App() {
           vx,
           vy
         });
-        audio.playEnemyShoot();
+        audio.playEnemyShoot(shooter.x + shooter.width / 2);
       }
     }
 
@@ -849,7 +850,7 @@ export default function App() {
           const shootInterval = enemy.phase === 3 ? 600 : enemy.phase === 2 ? 1000 : 1500;
           if (now - (enemy.lastShotTime || 0) > shootInterval) {
             enemy.lastShotTime = now;
-            audio.playEnemyShoot();
+            audio.playEnemyShoot(enemy.x + enemy.width / 2);
 
             if (enemy.phase === 1) {
               // Spread shot
@@ -897,7 +898,7 @@ export default function App() {
         const shootInterval = 2000 - Math.min(1000, waveRef.current * 50);
         if (now - (enemy.lastShotTime || 0) > shootInterval) {
           enemy.lastShotTime = now;
-          audio.playEnemyShoot();
+          audio.playEnemyShoot(enemy.x + enemy.width / 2);
           
           // Target player
           const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
@@ -1050,7 +1051,7 @@ export default function App() {
         });
         
         lastDiveTime.current = now;
-        audio.playDive();
+        audio.playDive(leader.x + leader.width / 2);
       }
     }
 
@@ -1065,7 +1066,7 @@ export default function App() {
             enemy.health! -= (bullet.damage || 1) * 10;
             setBossHealth({ current: enemy.health!, max: enemy.maxHealth! });
             bullets.current.splice(bIdx, 1);
-            audio.playEnemyHit();
+            audio.playEnemyHit(enemy.x + enemy.width / 2);
             flash.current = 0.2;
             
             if (enemy.health! <= 0) {
@@ -1077,7 +1078,7 @@ export default function App() {
                 setGameState('VICTORY');
               }
               
-              audio.playExplosion();
+              audio.playExplosion(enemy.x + enemy.width / 2);
               createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ff33cc', 100);
               
               // Drop many scraps
@@ -1166,7 +1167,7 @@ export default function App() {
             });
           }
 
-          audio.playEnemyHit();
+          audio.playEnemyHit(enemy.x + enemy.width / 2);
           shake.current = Math.max(shake.current, 5);
           
           // Spawn particles
