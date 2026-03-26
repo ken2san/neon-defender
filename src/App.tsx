@@ -651,10 +651,16 @@ export default function App() {
     setUpgradeOptions(shuffled.slice(0, 3));
     setShowUpgrade(true);
     setGameState('UPGRADE');
+    pauseStartTime.current = Date.now();
     audio.playUpgrade();
   };
 
   const startNextWave = () => {
+    if (isOverdriveActiveRef.current && pauseStartTime.current > 0) {
+      overdriveEndTime.current += (Date.now() - pauseStartTime.current);
+    }
+    pauseStartTime.current = 0;
+    
     setGameState('PLAYING');
     waveRef.current += 1;
     setWave(waveRef.current);
@@ -697,6 +703,7 @@ export default function App() {
     setUpgradeOptions(shuffled.slice(0, 4));
     setShowUpgrade(true);
     setGameState('RELIC_SELECT');
+    pauseStartTime.current = Date.now();
     audio.playUpgrade();
   };
 
@@ -742,9 +749,10 @@ export default function App() {
     }
     
     // Resume overdrive timer if active
-    if (isOverdriveActiveRef.current) {
+    if (isOverdriveActiveRef.current && pauseStartTime.current > 0) {
       overdriveEndTime.current += (Date.now() - pauseStartTime.current);
     }
+    pauseStartTime.current = 0; // Reset after use
     
     setShowUpgrade(false);
     saveGame(); // Auto-save on upgrade/stage clear
@@ -937,7 +945,7 @@ export default function App() {
 
       // Two-finger tap for Overdrive
       if (e.touches.length >= 2) {
-        if (overdriveGauge.current >= MAX_OVERDRIVE && !isOverdriveActive.current) {
+        if (overdriveGauge.current >= MAX_OVERDRIVE && !isOverdriveActiveRef.current) {
           activateOverdrive();
         }
       }
@@ -1329,6 +1337,7 @@ export default function App() {
       
       if (survivalTimerRef.current <= 0) {
         setGameState('STAGE_CLEAR');
+        pauseStartTime.current = Date.now();
         if (waveRef.current % 2 === 0) {
           triggerRelicSelection();
         } else {
@@ -2407,6 +2416,7 @@ export default function App() {
     if (isWaveCleared && gameState === 'PLAYING') {
       isWarping.current = true;
       warpStartTime.current = Date.now();
+      pauseStartTime.current = Date.now();
       audio.playWaveClear();
       audio.playWarp();
       
@@ -2419,7 +2429,6 @@ export default function App() {
       setTimeout(() => {
         if (waveRef.current % 2 === 0) {
           triggerRelicSelection();
-          pauseStartTime.current = Date.now();
         } else {
           startNextWave();
         }
