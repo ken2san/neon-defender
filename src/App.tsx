@@ -247,6 +247,7 @@ export default function App() {
   const [waveTitle, setWaveTitle] = useState(false);
   const [bossHealth, setBossHealth] = useState<{current: number, max: number} | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [hasSaveData, setHasSaveData] = useState(false);
 
   // Touch Movement Refs
   const touchStartPos = useRef({ x: 0, y: 0 });
@@ -277,7 +278,10 @@ export default function App() {
   const isHackedRef = useRef(false);
   const stageStartTime = useRef(0);
   const ambushTimer = useRef(0);
-  const [survivalTime, setSurvivalTime] = useState(0);
+  const [survivalTime, setSurvivalTime] = useState(45);
+  const survivalTimerRef = useRef(45);
+  const blocks = useRef<Obstacle[]>([]);
+  const lastBlockRowY = useRef(0);
 
   // Initialize stars and offscreen canvas
   useEffect(() => {
@@ -295,6 +299,78 @@ export default function App() {
     offscreenCanvas.current.height = CANVAS_HEIGHT;
     offscreenCtx.current = offscreenCanvas.current.getContext('2d');
   }, []);
+
+  useEffect(() => {
+    const saveData = localStorage.getItem('neon_defender_save');
+    if (saveData) {
+      setHasSaveData(true);
+    }
+  }, []);
+
+  const saveGame = () => {
+    const saveData = {
+      wave: waveRef.current,
+      score: score,
+      scrapCount: scrapCount,
+      level: levelRef.current,
+      xp: xpRef.current,
+      xpToNextLevel: xpToNextLevelRef.current,
+      relics: relicsRef.current,
+      stats: {
+        firepower: firepowerRef.current,
+        speed: speedRef.current,
+        magnet: magnetRef.current,
+        critChance: critChanceRef.current,
+        regen: regenRef.current,
+        chainLightning: chainLightningRef.current
+      }
+    };
+    localStorage.setItem('neon_defender_save', JSON.stringify(saveData));
+    setHasSaveData(true);
+  };
+
+  const loadGame = () => {
+    const saveDataStr = localStorage.getItem('neon_defender_save');
+    if (!saveDataStr) return;
+    
+    const saveData = JSON.parse(saveDataStr);
+    
+    setScore(saveData.score);
+    setWave(saveData.wave);
+    waveRef.current = saveData.wave;
+    setScrapCount(saveData.scrapCount);
+    setLevel(saveData.level);
+    levelRef.current = saveData.level;
+    setXp(saveData.xp);
+    xpRef.current = saveData.xp;
+    setXpToNextLevel(saveData.xpToNextLevel);
+    xpToNextLevelRef.current = saveData.xpToNextLevel;
+    setRelics(saveData.relics);
+    relicsRef.current = saveData.relics;
+    
+    firepowerRef.current = saveData.stats.firepower;
+    speedRef.current = saveData.stats.speed;
+    magnetRef.current = saveData.stats.magnet;
+    critChanceRef.current = saveData.stats.critChance;
+    regenRef.current = saveData.stats.regen;
+    chainLightningRef.current = saveData.stats.chainLightning;
+    
+    // Check for specific relics that need initialization
+    if (relicsRef.current.some(r => r.id === 'WINGMAN')) {
+      setHasWingman(true);
+      wingmanRef.current = true;
+    }
+    const droneCount = relicsRef.current.filter(r => r.id === 'DRONE').length;
+    for(let i=0; i<droneCount; i++) {
+      drones.current.push({ angle: Math.random() * Math.PI * 2, distance: 60, lastShot: 0 });
+    }
+
+    setGameState('PLAYING');
+    initEnemies(saveData.wave);
+    audio.init();
+    audio.playBGM();
+    audio.playStageStart();
+  };
 
   // Detect touch device and handle resize
   useEffect(() => {
@@ -471,9 +547,10 @@ export default function App() {
     } else {
       // Normal Waves strictly following the 5-stage design
       if (stage === 1) {
-        // Level 1: Scouts only, formation flight
-        for (let i = 0; i < 12; i++) {
-          newEnemies.push(createEnemy(80 + (i % 4) * 120, 60 + Math.floor(i / 4) * 80, 0));
+        // Level 1: Scouts only, light formation
+        const count = waveNum === 1 ? 6 : 10;
+        for (let i = 0; i < count; i++) {
+          newEnemies.push(createEnemy(100 + (i % 5) * 100, 80 + Math.floor(i / 5) * 80, 0));
         }
       } else if (stage === 2) {
         // Level 2: Scouts + Asteroids (handled in update)
@@ -485,20 +562,21 @@ export default function App() {
         for (let i = 0; i < 8; i++) {
           newEnemies.push(createEnemy(60 + (i % 4) * 140, 60 + Math.floor(i / 4) * 70, 1));
         }
-        for (let i = 0; i < 3; i++) {
-          const turret = createEnemy(120 + i * 180, 220, 1);
+        for (let i = 0; i < 2; i++) {
+          const turret = createEnemy(150 + i * 200, 220, 1);
           turret.isTurret = true;
           turret.width = 50; turret.height = 50; turret.health = 80;
           newEnemies.push(turret);
         }
       } else if (stage === 4) {
-        // Level 4: Fast scouts from sides and bottom
-        for (let i = 0; i < 12; i++) {
+        // Level 4: Fast scouts from sides and bottom (Chase)
+        // Fewer enemies because of maze
+        for (let i = 0; i < 8; i++) {
           const enemy = createEnemy(Math.random() * CANVAS_WIDTH, -50, 2);
           enemy.state = 'DIVING';
           enemy.isDiving = true;
           enemy.diveX = (Math.random() - 0.5) * 4;
-          enemy.diveY = 7;
+          enemy.diveY = 6;
           newEnemies.push(enemy);
         }
       } else if (stage === 5) {
@@ -618,6 +696,7 @@ export default function App() {
     }
     
     setShowUpgrade(false);
+    saveGame(); // Auto-save on upgrade/stage clear
     
     if (gameState === 'UPGRADE') {
       setGameState('PLAYING');
@@ -634,6 +713,10 @@ export default function App() {
       setDistance(prev => Math.max(0, prev - 1000));
       initEnemies(waveRef.current);
       
+      survivalTimerRef.current = 45;
+      setSurvivalTime(45);
+      blocks.current = [];
+      
       setWaveTitle(true);
       audio.playStageStart();
       setTimeout(() => setWaveTitle(false), 2000);
@@ -643,6 +726,75 @@ export default function App() {
         warpFactor.current = 0;
       }, 1000);
     }
+  };
+
+  const generateMazeRow = () => {
+    const currentStage = Math.min(5, Math.ceil(waveRef.current / 2));
+    // Only generate maze blocks from Stage 4 onwards (The Canyon/Chase)
+    if (currentStage < 4) return;
+
+    const rowY = -100;
+    const blockWidth = CANVAS_WIDTH / 10;
+    const blockHeight = 100;
+
+    // Density increases with wave
+    const wallDensity = 0.05 + (waveRef.current - 7) * 0.02; // Very sparse initially
+    const destructibleDensity = 0.1 + (waveRef.current - 7) * 0.03;
+
+    for (let i = 0; i < 10; i++) {
+      const rand = Math.random();
+      if (rand < wallDensity) {
+        // Indestructible Wall
+        blocks.current.push({
+          id: Date.now() + i,
+          x: i * blockWidth,
+          y: rowY,
+          width: blockWidth,
+          height: blockHeight,
+          type: 'WALL',
+          hp: 999,
+          maxHp: 999,
+          color: '#1a1a2e'
+        });
+      } else if (rand < wallDensity + destructibleDensity) {
+        // Destructible Block
+        const isCore = Math.random() < 0.1;
+        blocks.current.push({
+          id: Date.now() + i,
+          x: i * blockWidth,
+          y: rowY,
+          width: blockWidth,
+          height: blockHeight,
+          type: isCore ? 'PILLAR' : 'BUILDING', // Using PILLAR as Core
+          hp: isCore ? 1 : 10,
+          maxHp: isCore ? 1 : 10,
+          color: isCore ? '#ff3366' : '#33ccff'
+        });
+      }
+    }
+  };
+
+  const triggerChainExplosion = (source: Obstacle) => {
+    audio.playExplosion(source.x);
+    createExplosion(source.x + source.width / 2, source.y + source.height / 2, source.color, 40);
+    setScore(s => s + 500);
+
+    // Find adjacent destructible blocks
+    blocks.current.forEach(block => {
+      if (block.hp > 0 && block.type !== 'WALL') {
+        const dx = Math.abs(block.x - source.x);
+        const dy = Math.abs(block.y - source.y);
+        if (dx <= source.width + 5 && dy <= source.height + 5) {
+          // Chain reaction delay
+          setTimeout(() => {
+            if (block.hp > 0) {
+              block.hp = 0;
+              triggerChainExplosion(block);
+            }
+          }, 100);
+        }
+      }
+    });
   };
 
   const startGame = () => {
@@ -685,13 +837,17 @@ export default function App() {
     trails.current = [];
     scraps.current = [];
     asteroids.current = [];
+    blocks.current = [];
     obstacles.current = [];
     lastObstacleTime.current = 0;
+    survivalTimerRef.current = 45;
+    setSurvivalTime(45);
     shake.current = 0;
     flash.current = 0;
     initEnemies(1);
     audio.playStageStart();
     setGameState('PLAYING');
+    saveGame();
   };
 
   // Input handling
@@ -840,6 +996,7 @@ export default function App() {
     if (gameState !== 'PLAYING' || showUpgrade) return;
 
     const currentStage = Math.min(5, Math.ceil(waveRef.current / 2));
+    const isAsteroidBelt = currentStage === 2;
 
     // Apply slow-mo recovery
     if (timeScale.current < 1.0) {
@@ -912,23 +1069,25 @@ export default function App() {
     const speedMultiplier = 1 + (speedRef.current - 1) * 0.15;
     const currentSpeed = (isOverdriveActive.current ? PLAYER_SPEED * 1.5 : PLAYER_SPEED) * speedMultiplier;
 
+    // Relative Movement Input
+    let moveX = 0;
+    let moveY = 0;
+
+    if (keysPressed.current['ArrowLeft'] || keysPressed.current['KeyA']) moveX -= 1;
+    if (keysPressed.current['ArrowRight'] || keysPressed.current['KeyD']) moveX += 1;
+    if (keysPressed.current['ArrowUp'] || keysPressed.current['KeyW']) moveY -= 1;
+    if (keysPressed.current['ArrowDown'] || keysPressed.current['KeyS']) moveY += 1;
+
+    if (moveX !== 0 || moveY !== 0) {
+      const mag = Math.sqrt(moveX * moveX + moveY * moveY);
+      targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, targetPos.current.x + (moveX / mag) * currentSpeed));
+      targetPos.current.y = Math.max(CANVAS_HEIGHT * 0.2, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT - 20, targetPos.current.y + (moveY / mag) * currentSpeed));
+    }
+
     // Hacked Jitter
     if (isHackedRef.current) {
       targetPos.current.x += (Math.random() - 0.5) * 15;
       targetPos.current.y += (Math.random() - 0.5) * 15;
-    }
-
-    if (keysPressed.current['ArrowLeft'] || keysPressed.current['KeyA']) {
-      targetPos.current.x = Math.max(0, targetPos.current.x - currentSpeed);
-    }
-    if (keysPressed.current['ArrowRight'] || keysPressed.current['KeyD']) {
-      targetPos.current.x = Math.min(CANVAS_WIDTH - PLAYER_WIDTH, targetPos.current.x + currentSpeed);
-    }
-    if (keysPressed.current['ArrowUp'] || keysPressed.current['KeyW']) {
-      targetPos.current.y = Math.max(CANVAS_HEIGHT * 0.2, targetPos.current.y - currentSpeed);
-    }
-    if (keysPressed.current['ArrowDown'] || keysPressed.current['KeyS']) {
-      targetPos.current.y = Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT - 20, targetPos.current.y + currentSpeed);
     }
 
     // Lerp player position
@@ -936,11 +1095,48 @@ export default function App() {
     playerPos.current.x += (targetPos.current.x - playerPos.current.x) * FOLLOW_SMOOTHNESS;
     playerPos.current.y += (targetPos.current.y - playerPos.current.y) * FOLLOW_SMOOTHNESS;
 
-    // Calculate Tilt (Smoother)
-    const dx = playerPos.current.x - prevX;
-    playerTilt.current += (dx * 0.15 - playerTilt.current) * 0.1;
+    // Calculate Tilt (Dynamic)
+    const vx = playerPos.current.x - prevX;
+    playerTilt.current += (vx * 0.2 - playerTilt.current) * 0.1;
 
-    let isMoving = Math.abs(dx) > 0.1 || Math.abs(playerPos.current.y - targetPos.current.y) > 0.1;
+    // Overdrive Ramming Logic
+    if (isOverdriveActive.current) {
+      const ramRect = {
+        x: playerPos.current.x,
+        y: playerPos.current.y,
+        w: PLAYER_WIDTH,
+        h: PLAYER_HEIGHT
+      };
+
+      enemies.current.forEach(enemy => {
+        if (enemy.alive && 
+            ramRect.x < enemy.x + enemy.width &&
+            ramRect.x + ramRect.w > enemy.x &&
+            ramRect.y < enemy.y + enemy.height &&
+            ramRect.y + ramRect.h > enemy.y) {
+          enemy.health = 0;
+          enemy.alive = false;
+          createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ff3366', 30);
+          setScore(s => s + 500);
+          audio.playExplosion(enemy.x);
+        }
+      });
+
+      blocks.current.forEach(block => {
+        if (block.hp > 0 &&
+            ramRect.x < block.x + block.width &&
+            ramRect.x + ramRect.w > block.x &&
+            ramRect.y < block.y + block.height &&
+            ramRect.y + ramRect.h > block.y) {
+          if (block.type !== 'WALL') {
+            block.hp = 0;
+            triggerChainExplosion(block);
+          }
+        }
+      });
+    }
+
+    const isMoving = Math.abs(targetPos.current.x - playerPos.current.x) > 0.1 || Math.abs(targetPos.current.y - playerPos.current.y) > 0.1;
 
     // Add trail
     if (isMoving && Date.now() % 3 === 0) {
@@ -1032,51 +1228,58 @@ export default function App() {
       setLives(Math.floor(livesRef.current));
     }
 
-    // Update Asteroids
-    const isAsteroidBelt = currentStage === 2;
-    
-    // Asteroid Spawning Logic (Route Guarantee)
-    if ((isAsteroidBelt || currentStage === 5) && !isWarping.current) {
-      asteroidSpawnTimer.current += 16 * timeScale.current;
-      const spawnRate = isAsteroidBelt ? 400 : 1200; // More frequent in belt
-      if (asteroidSpawnTimer.current > spawnRate) {
-        asteroidSpawnTimer.current = 0;
-        
-        // Ensure a gap: Pick a random "Safe X" corridor that will be clear of asteroids
-        const safeX = Math.random() * (CANVAS_WIDTH - 160) + 80;
-        const safeWidth = 120;
-        
-        // Divide remaining space into potential spawn zones
-        const spawnZones = [
-          { min: 0, max: safeX - safeWidth / 2 },
-          { min: safeX + safeWidth / 2, max: CANVAS_WIDTH }
-        ].filter(z => z.max - z.min > 40);
-        
-        spawnZones.forEach(zone => {
-          const numInZone = isAsteroidBelt ? 2 : 1;
-          for(let i=0; i<numInZone; i++) {
-            const size = isAsteroidBelt ? Math.random() * 50 + 30 : Math.random() * 40 + 20;
-            const x = zone.min + Math.random() * (zone.max - zone.min - size);
-            if (x < 0 || x > CANVAS_WIDTH - size) continue;
-
-            const vertices = [];
-            for (let j = 0; j < 8; j++) {
-              vertices.push(0.8 + Math.random() * 0.4);
-            }
-            asteroids.current.push({
-              x: x + size / 2,
-              y: -150,
-              size: size,
-              speed: isAsteroidBelt ? 2.2 : 3.5,
-              rotation: Math.random() * Math.PI * 2,
-              vr: (Math.random() - 0.5) * 0.05,
-              hp: isAsteroidBelt ? 40 : 15,
-              vertices: vertices
-            });
-          }
-        });
+    // Survival Timer Logic
+    if (!isWarping.current) {
+      survivalTimerRef.current -= (16 / 1000) * timeScale.current;
+      setSurvivalTime(Math.max(0, Math.floor(survivalTimerRef.current)));
+      
+      if (survivalTimerRef.current <= 0) {
+        setGameState('STAGE_CLEAR');
+        triggerRelicSelection();
+        isWarping.current = true;
+        warpStartTime.current = Date.now();
       }
     }
+
+    // Maze Generation (Canyon)
+    const scrollSpeed = 3 * timeScale.current;
+    lastBlockRowY.current += scrollSpeed;
+    if (lastBlockRowY.current > 100) {
+      lastBlockRowY.current = 0;
+      generateMazeRow();
+    }
+
+    blocks.current.forEach(block => {
+      block.y += scrollSpeed;
+      
+      // Collision with player
+      if (block.hp > 0 && !isOverdriveActive.current && Date.now() > invulnerableUntil.current) {
+        if (playerPos.current.x < block.x + block.width &&
+            playerPos.current.x + PLAYER_WIDTH > block.x &&
+            playerPos.current.y < block.y + block.height &&
+            playerPos.current.y + PLAYER_HEIGHT > block.y) {
+          handlePlayerHit();
+        }
+      }
+
+      // Collision with bullets
+      bullets.current.forEach(bullet => {
+        if (block.hp > 0 &&
+            bullet.x > block.x && bullet.x < block.x + block.width &&
+            bullet.y > block.y && bullet.y < block.y + block.height) {
+          if (block.type !== 'WALL') {
+            block.hp -= (bullet.damage || 1);
+            bullet.y = -100;
+            if (block.hp <= 0) {
+              triggerChainExplosion(block);
+            }
+          } else {
+            bullet.y = -100; // Wall is indestructible
+          }
+        }
+      });
+    });
+    blocks.current = blocks.current.filter(b => b.y < CANVAS_HEIGHT + 100);
     
     asteroids.current.forEach(a => {
       a.y += a.speed * timeScale.current;
@@ -1235,17 +1438,15 @@ export default function App() {
         overdriveGauge.current = 0;
         setOverdrive(0);
       } else {
-        const remaining = (overdriveEndTime.current - Date.now()) / 10000;
+        const hasFrenzy = relicsRef.current.some(r => r.id === 'FRENZY');
+        const duration = hasFrenzy ? 15000 : 10000;
+        const remaining = (overdriveEndTime.current - Date.now()) / duration;
         setOverdrive(remaining * 100);
       }
     } else {
       if (keysPressed.current['KeyX'] || keysPressed.current['TouchOverdrive']) {
-        if (overdriveGauge.current >= 100) {
-          isOverdriveActive.current = true;
-          overdriveEndTime.current = Date.now() + 10000; // 10 seconds
-          shake.current = 30;
-          flash.current = 0.5;
-          audio.playOverdrive();
+        if (overdriveGauge.current >= MAX_OVERDRIVE) {
+          activateOverdrive();
         }
       }
     }
@@ -2335,6 +2536,40 @@ export default function App() {
       ctx.restore();
     });
 
+    // Draw Maze Blocks
+    blocks.current.forEach(block => {
+      if (block.hp <= 0) return;
+      ctx.save();
+      ctx.translate(block.x, block.y);
+      
+      const color = block.color;
+      ctx.shadowBlur = block.type === 'WALL' ? 0 : 15;
+      ctx.shadowColor = color;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = block.type === 'WALL' ? 1 : 2;
+      
+      if (block.type === 'WALL') {
+        ctx.fillStyle = 'rgba(26, 26, 46, 0.8)';
+        ctx.fillRect(0, 0, block.width, block.height);
+        ctx.strokeRect(0, 0, block.width, block.height);
+      } else {
+        ctx.strokeRect(2, 2, block.width - 4, block.height - 4);
+        // Inner details
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.3;
+        if (block.type === 'PILLAR') { // Core
+          ctx.beginPath();
+          ctx.arc(block.width / 2, block.height / 2, 15, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.fillStyle = color;
+          ctx.fill();
+        } else {
+          ctx.strokeRect(10, 10, block.width - 20, block.height - 20);
+        }
+      }
+      ctx.restore();
+    });
+
     // Player
     const isInvulnerable = Date.now() < invulnerableUntil.current;
     const blink = Math.floor(Date.now() / 100) % 2 === 0;
@@ -2984,41 +3219,55 @@ export default function App() {
               </div>
             </div>
 
-            {/* Overdrive Gauge */}
-            <div className="flex items-center gap-3">
-              <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Overdrive</span>
-              <div className="w-36 h-2 bg-black/40 rounded-full overflow-hidden border border-white/10 p-[1px] relative">
-                <motion.div 
-                  animate={{ width: `${(overdrive / MAX_OVERDRIVE) * 100}%` }}
-                  className={`h-full rounded-full transition-colors duration-300 ${
-                    overdrive >= MAX_OVERDRIVE 
-                      ? 'bg-[#ffcc00] shadow-[0_0_20px_rgba(255,204,0,1)]' 
-                      : 'bg-gradient-to-r from-[#33ccff] to-[#00ffcc]'
-                  }`}
-                />
-                {overdrive >= MAX_OVERDRIVE && (
+            {/* Overdrive Gauge (Interactive on Mobile) */}
+            <div className="flex flex-col items-end gap-2">
+              <div className="flex items-center gap-3">
+                <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Overdrive</span>
+                <button 
+                  onClick={() => {
+                    if (overdrive >= MAX_OVERDRIVE && !isOverdriveActive.current) {
+                      activateOverdrive();
+                    }
+                  }}
+                  disabled={overdrive < MAX_OVERDRIVE || isOverdriveActive.current}
+                  className={`w-36 h-3 bg-black/40 rounded-full overflow-hidden border border-white/10 p-[1px] relative cursor-pointer transition-all ${overdrive >= MAX_OVERDRIVE && !isOverdriveActive.current ? 'border-[#ff3366] shadow-[0_0_15px_rgba(255,51,102,0.4)]' : ''}`}
+                >
                   <motion.div 
-                    animate={{ opacity: [0, 1, 0] }}
-                    transition={{ duration: 0.5, repeat: Infinity }}
-                    className="absolute inset-0 bg-white/20"
+                    animate={overdrive >= MAX_OVERDRIVE && !isOverdriveActive.current 
+                      ? { 
+                          width: '100%',
+                          backgroundColor: ['#ff3366', '#ff336633', '#ff3366'],
+                        } 
+                      : { 
+                          width: `${(overdrive / MAX_OVERDRIVE) * 100}%`,
+                          backgroundColor: isOverdriveActive.current ? '#ff3366' : '#00ffcc'
+                        }
+                    }
+                    transition={overdrive >= MAX_OVERDRIVE && !isOverdriveActive.current 
+                      ? { duration: 0.5, repeat: Infinity } 
+                      : { duration: 0.3 }
+                    }
+                    className="h-full rounded-full shadow-[0_0_20px_rgba(255,51,102,0.6)]"
                   />
-                )}
+                  {overdrive >= MAX_OVERDRIVE && !isOverdriveActive.current && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-[7px] text-white font-black uppercase tracking-tighter animate-pulse">Tap to Burst</span>
+                    </div>
+                  )}
+                </button>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Progress Bar (Full Width of HUD) */}
+        {/* Progress Bar (Survival Timer) */}
         <div className="w-full h-[3px] bg-white/5 relative overflow-hidden rounded-full mt-1">
           <motion.div 
-            animate={{ width: `${(1 - distance / 25000) * 100}%` }}
-            className="h-full bg-gradient-to-r from-[#00ffcc] via-[#33ccff] to-[#00ffcc] shadow-[0_0_15px_rgba(0,255,204,0.6)]"
+            animate={{ width: `${(1 - survivalTime / 45) * 100}%` }}
+            className="h-full bg-gradient-to-r from-[#ff3366] via-[#ffcc00] to-[#ff3366] shadow-[0_0_15px_rgba(255,51,102,0.6)]"
           />
-          {/* Progress Markers */}
-          <div className="absolute inset-0 flex justify-between px-1">
-            {[...Array(6)].map((_, i) => (
-              <div key={i} className="w-[1px] h-full bg-white/20" />
-            ))}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <span className="text-[6px] text-white/40 font-bold uppercase tracking-[0.5em]">Sector_Progress</span>
           </div>
         </div>
       </div>
@@ -3282,15 +3531,30 @@ export default function App() {
               <p className="text-gray-400 mb-6 md:mb-10 max-w-[280px] md:max-w-xs text-xs md:text-sm leading-relaxed tracking-wide">
                 The swarm is approaching. <br/>Engage thrusters and defend the sector.
               </p>
-              <button
-                onClick={startGame}
-                className="group relative px-6 py-3 md:px-10 md:py-5 bg-[#00ffcc] text-black font-bold text-lg md:text-xl uppercase tracking-[0.2em] hover:scale-105 transition-all duration-300 shadow-[0_0_30px_rgba(0,255,204,0.3)]"
-              >
-                <span className="relative z-10 flex items-center gap-3">
-                  <Play size={20} className="md:w-6 md:h-6" fill="currentColor" /> Launch Mission
-                </span>
-                <div className="absolute inset-0 bg-white opacity-0 group-hover:opacity-30 transition-opacity" />
-              </button>
+              <div className="flex flex-col gap-4 w-64">
+                <button
+                  onClick={startGame}
+                  className="group relative px-8 py-4 bg-[#00ffcc] text-black font-black uppercase tracking-[0.2em] overflow-hidden transition-all hover:scale-105 active:scale-95"
+                >
+                  <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-[-20deg]" />
+                  <span className="relative z-10 flex items-center justify-center gap-2">
+                    <Play className="w-5 h-5 fill-current" />
+                    New Mission
+                  </span>
+                </button>
+
+                {hasSaveData && (
+                  <button
+                    onClick={loadGame}
+                    className="group relative px-8 py-4 bg-transparent border-2 border-[#ff3366] text-[#ff3366] font-black uppercase tracking-[0.2em] overflow-hidden transition-all hover:bg-[#ff3366]/10 hover:scale-105 active:scale-95"
+                  >
+                    <span className="relative z-10 flex items-center justify-center gap-2">
+                      <RotateCcw className="w-5 h-5" />
+                      Continue
+                    </span>
+                  </button>
+                )}
+              </div>
               <div className="mt-8 md:mt-16 grid grid-cols-3 gap-4 md:gap-8 text-[8px] md:text-[10px] text-gray-500 uppercase tracking-[0.4em]">
                 <div className="flex flex-col gap-1 md:gap-2">
                   <span className="text-gray-400">Movement</span>
@@ -3384,32 +3648,6 @@ export default function App() {
             zIndex: 100
           }}
         />
-      )}
-
-      {/* Mobile Overdrive Gauge Button (Floating Bottom Right) - Only on Touch Devices */}
-      {gameState === 'PLAYING' && isTouchDevice && (
-        <div className="fixed bottom-8 right-8 flex flex-col items-center gap-2 z-50">
-          <button 
-            onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchOverdrive'] = true; }}
-            onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchOverdrive'] = false; }}
-            className={`relative w-20 h-20 rounded-full border-2 overflow-hidden transition-all ${
-              overdrive >= 100 
-                ? 'border-[#ff3366] shadow-[0_0_20px_#ff3366] animate-pulse' 
-                : 'border-white/20 bg-white/5'
-            }`}
-          >
-            {/* Gauge Fill (Bottom to Top) */}
-            <motion.div 
-              animate={{ height: `${overdrive}%` }}
-              className="absolute bottom-0 left-0 w-full bg-[#ff3366]/40"
-            />
-            
-            <div className="relative z-10 flex flex-col items-center justify-center h-full">
-              <Zap size={32} className={overdrive >= 100 ? 'text-white' : 'text-white/40'} fill={overdrive >= 100 ? 'white' : 'none'} />
-              <span className="text-[8px] font-bold mt-1 text-white/60">OVERDRIVE</span>
-            </div>
-          </button>
-        </div>
       )}
 
       {/* Footer & Fullscreen */}
