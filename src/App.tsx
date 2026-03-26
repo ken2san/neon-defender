@@ -55,6 +55,7 @@ interface Enemy {
   diveStartX?: number;
   diveStartY?: number;
   isBoss?: boolean;
+  bossType?: BossType;
   health?: number;
   maxHealth?: number;
   phase?: number;
@@ -147,16 +148,24 @@ interface Asteroid {
   vertices: number[];
 }
 
+enum BossType {
+  TRACTOR = 'TRACTOR',
+  SWARM = 'SWARM',
+  LASER = 'LASER'
+}
+
 interface Obstacle {
   id: number;
   x: number;
   y: number;
   width: number;
   height: number;
-  type: 'BUILDING' | 'WALL' | 'PILLAR';
+  type: 'BUILDING' | 'WALL' | 'PILLAR' | 'TENTACLE';
   hp: number;
   maxHp: number;
   color: string;
+  segments?: { x: number, y: number, angle: number }[];
+  baseX?: number;
 }
 
 interface DamageNumber {
@@ -499,36 +508,36 @@ export default function App() {
     createExplosion(playerPos.current.x + PLAYER_WIDTH / 2, playerPos.current.y + PLAYER_HEIGHT / 2, '#00ffcc', 50);
   };
 
+  const createEnemy = (x: number, y: number, type: number, delay: number = 0, path?: {x: number, y: number}[]): Enemy => ({
+    x: path ? path[0].x : x, 
+    y: path ? path[0].y : y, 
+    width: 35, height: 35, alive: true, type,
+    isDiving: false, isReturning: false, diveX: 0, diveY: 0,
+    originX: x, originY: y, diveType: 'normal', turnY: 0,
+    diveTime: 0, diveStartX: 0, diveStartY: 0,
+    state: path ? 'ENTERING' : 'IN_FORMATION',
+    path: path,
+    pathIndex: 0,
+    entryDelay: delay,
+    tractorBeamTimer: 0,
+    isTractorBeaming: false,
+    tractorBeamX: 0,
+    stunnedUntil: 0
+  });
+
   // Initialize enemies
   const initEnemies = (waveNum: number) => {
     const newEnemies: Enemy[] = [];
     const stage = Math.min(5, Math.ceil(waveNum / 2));
-    const isBossWave = waveNum === 6 || waveNum === 10;
+    const isBossWave = waveNum === 6 || waveNum === 8 || waveNum === 10;
     
-    const createEnemy = (x: number, y: number, type: number, delay: number = 0, path?: {x: number, y: number}[]): Enemy => ({
-      x: path ? path[0].x : x, 
-      y: path ? path[0].y : y, 
-      width: 35, height: 35, alive: true, type,
-      isDiving: false, isReturning: false, diveX: 0, diveY: 0,
-      originX: x, originY: y, diveType: 'normal', turnY: 0,
-      diveTime: 0, diveStartX: 0, diveStartY: 0,
-      state: path ? 'ENTERING' : 'IN_FORMATION',
-      path: path,
-      pathIndex: 0,
-      entryDelay: delay,
-      tractorBeamTimer: 0,
-      isTractorBeaming: false,
-      tractorBeamX: 0,
-      stunnedUntil: 0
-    });
-
     if (isBossWave) {
       audio.playBossWarning();
       if (waveNum === 6) {
         // Level 3 Mid-Boss: Tractor Carrier (Galaga Homage)
         const boss: Enemy = {
           ...createEnemy(CANVAS_WIDTH / 2 - 60, 80, 1),
-          width: 120, height: 90, isBoss: true, health: 1500, maxHealth: 1500,
+          width: 120, height: 90, isBoss: true, bossType: BossType.TRACTOR, health: 1500, maxHealth: 1500,
           phase: 1, moveDir: 1, lastShotTime: 0
         };
         newEnemies.push(boss);
@@ -537,11 +546,20 @@ export default function App() {
         // Level 5 Final Boss: The Core (Mothership)
         const boss: Enemy = {
           ...createEnemy(CANVAS_WIDTH / 2 - 100, 80, 2),
-          width: 200, height: 160, isBoss: true, isFinalBoss: true, health: 5000, maxHealth: 5000,
+          width: 200, height: 160, isBoss: true, bossType: BossType.LASER, isFinalBoss: true, health: 5000, maxHealth: 5000,
           phase: 1, moveDir: 1, lastShotTime: 0
         };
         newEnemies.push(boss);
         setBossHealth({ current: 5000, max: 5000 });
+      } else if (waveNum === 8) {
+        // Level 4 Mid-Boss: Swarm Queen
+        const boss: Enemy = {
+          ...createEnemy(CANVAS_WIDTH / 2 - 80, 80, 0),
+          width: 160, height: 120, isBoss: true, bossType: BossType.SWARM, health: 3000, maxHealth: 3000,
+          phase: 1, moveDir: 1, lastShotTime: 0
+        };
+        newEnemies.push(boss);
+        setBossHealth({ current: 3000, max: 3000 });
       }
     } else {
       // Normal Waves strictly following the 5-stage design
@@ -746,13 +764,16 @@ export default function App() {
     // Density increases with stage and wave
     let wallDensity = 0.02;
     let destructibleDensity = 0.05;
+    let tentacleChance = 0.01;
 
     if (currentStage === 3) {
       wallDensity = 0.04;
       destructibleDensity = 0.08;
+      tentacleChance = 0.03;
     } else if (currentStage >= 4) {
       wallDensity = 0.06 + (waveRef.current - 7) * 0.02;
       destructibleDensity = 0.12 + (waveRef.current - 7) * 0.03;
+      tentacleChance = 0.05;
     }
 
     for (let i = 0; i < 10; i++) {
@@ -783,6 +804,25 @@ export default function App() {
           hp: isCore ? 1 : 10,
           maxHp: isCore ? 1 : 10,
           color: isCore ? '#ff3366' : '#33ccff'
+        });
+      } else if (rand < wallDensity + destructibleDensity + tentacleChance) {
+        // Tentacle (R-Type style)
+        const segments = [];
+        for (let j = 0; j < 8; j++) {
+          segments.push({ x: 0, y: j * 20, angle: 0 });
+        }
+        blocks.current.push({
+          id: Date.now() + i,
+          x: i * blockWidth + blockWidth / 2,
+          y: rowY,
+          width: 40,
+          height: 160,
+          type: 'TENTACLE',
+          hp: 30,
+          maxHp: 30,
+          color: '#ff3366',
+          segments: segments,
+          baseX: i * blockWidth + blockWidth / 2
         });
       }
     }
@@ -1301,6 +1341,16 @@ export default function App() {
     blocks.current.forEach(block => {
       block.y += scrollSpeed;
       
+      // Tentacle movement
+      if (block.type === 'TENTACLE' && block.segments && block.baseX !== undefined) {
+        const time = Date.now() / 1000;
+        block.x = block.baseX + Math.sin(time * 2 + block.id) * 50;
+        block.segments.forEach((seg, i) => {
+          seg.x = Math.sin(time * 3 + i * 0.5 + block.id) * 30;
+          seg.angle = Math.sin(time * 2 + i * 0.3) * 0.5;
+        });
+      }
+      
       // Collision with player
       if (block.hp > 0 && !isOverdriveActiveRef.current && Date.now() > invulnerableUntil.current) {
         if (playerPos.current.x < block.x + block.width &&
@@ -1494,16 +1544,28 @@ export default function App() {
 
     // Overdrive Logic
     if (isOverdriveActiveRef.current) {
-      if (Date.now() > overdriveEndTime.current) {
+      const now = Date.now();
+      if (now > overdriveEndTime.current) {
         isOverdriveActiveRef.current = false;
         setIsOverdriveActive(false);
         overdriveGauge.current = 0;
         setOverdrive(0);
+        shake.current = 10;
+        audio.playPowerDown(); // Add a sound for ending
       } else {
         const hasFrenzy = relicsRef.current.some(r => r.id === 'FRENZY');
-        const duration = hasFrenzy ? 15000 : 10000;
-        const remaining = (overdriveEndTime.current - Date.now()) / duration;
-        setOverdrive(remaining * 100);
+        const totalDuration = hasFrenzy ? 15000 : 10000;
+        const elapsed = totalDuration - (overdriveEndTime.current - now);
+        const remainingPercent = Math.max(0, 100 - (elapsed / totalDuration) * 100);
+        
+        // Sync ref and state
+        overdriveGauge.current = remainingPercent;
+        setOverdrive(remainingPercent);
+        
+        // Visual feedback
+        if (Math.random() > 0.8) {
+          glitch.current = 0.3;
+        }
       }
     } else {
       if (keysPressed.current['KeyX'] || keysPressed.current['TouchOverdrive']) {
@@ -1676,137 +1738,110 @@ export default function App() {
 
       // Boss Logic
       if (enemy.isBoss) {
-        // Tractor Beam Logic (Mid-Boss)
-        if (waveRef.current === 6) {
-          enemy.tractorBeamTimer += 16 * timeScale.current;
-          
-          // Warning phase (Charging)
-          if (!enemy.isTractorBeaming && enemy.tractorBeamTimer > 2500 && enemy.tractorBeamTimer < 3000) {
-            enemy.tractorBeamX = enemy.x + enemy.width / 2;
-          }
-
-          if (!enemy.isTractorBeaming && enemy.tractorBeamTimer > 3000) {
-            enemy.isTractorBeaming = true;
-            enemy.tractorBeamTimer = 0;
-            enemy.tractorBeamX = enemy.x + enemy.width / 2;
-            audio.playTractorBeam();
-          }
-
-          if (enemy.isTractorBeaming) {
-            if (enemy.tractorBeamTimer > 3000) {
-              enemy.isTractorBeaming = false;
-              enemy.tractorBeamTimer = 0;
-              isHackedRef.current = false; // Clear hacked state when beam stops
-            }
-            
-            // Check collision and apply force
-            const beamWidth = 120;
-            const px = playerPos.current.x + PLAYER_WIDTH / 2;
-            const py = playerPos.current.y + PLAYER_HEIGHT / 2;
-            
-            if (Math.abs(px - enemy.tractorBeamX) < beamWidth / 2 && py > enemy.y) {
-              // Pull towards center of beam
-              playerPos.current.x += (enemy.tractorBeamX - px) * 0.05;
-              
-              // Damage over time
-              if (currentTime % 500 < 20) {
-                handlePlayerHit();
-              }
-              
-              isHackedRef.current = true;
-              glitch.current = 15;
-            }
-          }
-        }
-
+        // Boss Movement & Phase Logic
         if (enemy.y < enemy.originY) {
           enemy.y += 1; // Entry
         } else {
           // Horizontal movement
-          let moveSpeed = currentStage === 4 ? 4 : 1.5;
-          
-          if (currentStage === 5 && enemy.phase === 3) {
-            if (!enemy.diveStartX) {
-              enemy.diveStartX = currentTime;
-            }
-            const dashTime = currentTime - enemy.diveStartX;
-            if (dashTime < 1000) {
-              moveSpeed = 0;
-              enemy.diveX = playerPos.current.x - enemy.width / 2;
-            } else if (dashTime < 1500) {
-              enemy.y += 15;
-              enemy.x += (enemy.diveX - enemy.x) * 0.1;
-            } else if (dashTime < 2500) {
-              enemy.y -= 5;
-            } else {
-              enemy.diveStartX = 0;
-              enemy.y = enemy.originY;
-            }
-          } else {
-            enemy.x += (enemy.moveDir || 1) * moveSpeed;
-            if (enemy.x < 50 || enemy.x > CANVAS_WIDTH - enemy.width - 50) {
-              enemy.moveDir = (enemy.moveDir || 1) * -1;
-            }
+          let moveSpeed = enemy.bossType === BossType.LASER ? 0.5 : 1.5;
+          if (enemy.phase === 3) moveSpeed *= 1.5;
+
+          enemy.x += (enemy.moveDir || 1) * moveSpeed;
+          if (enemy.x < 50 || enemy.x > CANVAS_WIDTH - enemy.width - 50) {
+            enemy.moveDir = (enemy.moveDir || 1) * -1;
           }
 
           // Phase logic
           if (enemy.health! < enemy.maxHealth! * 0.3) enemy.phase = 3;
           else if (enemy.health! < enemy.maxHealth! * 0.6) enemy.phase = 2;
 
-          // Boss shooting
+          // Boss specific behaviors
+          if (enemy.bossType === BossType.TRACTOR) {
+            enemy.tractorBeamTimer += 16 * timeScale.current;
+            if (!enemy.isTractorBeaming && enemy.tractorBeamTimer > 3000) {
+              enemy.isTractorBeaming = true;
+              enemy.tractorBeamTimer = 0;
+              enemy.tractorBeamX = enemy.x + enemy.width / 2;
+              audio.playTractorBeam();
+            }
+            if (enemy.isTractorBeaming) {
+              if (enemy.tractorBeamTimer > 3000) {
+                enemy.isTractorBeaming = false;
+                enemy.tractorBeamTimer = 0;
+                isHackedRef.current = false;
+              }
+              const beamWidth = 120;
+              const px = playerPos.current.x + PLAYER_WIDTH / 2;
+              const py = playerPos.current.y + PLAYER_HEIGHT / 2;
+              if (Math.abs(px - enemy.tractorBeamX!) < beamWidth / 2 && py > enemy.y) {
+                playerPos.current.x += (enemy.tractorBeamX! - px) * 0.05;
+                if (currentTime % 500 < 20) handlePlayerHit();
+                isHackedRef.current = true;
+                glitch.current = 15;
+              }
+            }
+          } else if (enemy.bossType === BossType.SWARM) {
+            // Spawns small fast enemies
+            if (currentTime - (enemy.lastShotTime || 0) > (enemy.phase === 3 ? 1000 : 2000)) {
+              enemy.lastShotTime = currentTime;
+              for (let i = 0; i < 3; i++) {
+                const swarmEnemy: Enemy = {
+                  ...createEnemy(enemy.x + enemy.width / 2, enemy.y + enemy.height, 0),
+                  isDiving: true,
+                  diveType: 'chase',
+                  diveX: playerPos.current.x,
+                  diveY: playerPos.current.y,
+                  state: 'DIVING'
+                };
+                enemies.current.push(swarmEnemy);
+              }
+              audio.playDive(enemy.x);
+            }
+          } else if (enemy.bossType === BossType.LASER) {
+            // Rotating Laser Beams
+            enemy.tractorBeamTimer += 16 * timeScale.current; // Using this as rotation angle
+            const angle = (enemy.tractorBeamTimer / 1000) * Math.PI;
+            const laserCount = enemy.phase === 3 ? 4 : 2;
+            
+            for (let i = 0; i < laserCount; i++) {
+              const laserAngle = angle + (i * Math.PI * 2 / laserCount);
+              const lx = enemy.x + enemy.width / 2;
+              const ly = enemy.y + enemy.height / 2;
+              
+              // Check collision with player
+              const px = playerPos.current.x + PLAYER_WIDTH / 2;
+              const py = playerPos.current.y + PLAYER_HEIGHT / 2;
+              
+              const dx = px - lx;
+              const dy = py - ly;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              const playerAngle = Math.atan2(dy, dx);
+              
+              let diff = Math.abs(playerAngle - laserAngle) % (Math.PI * 2);
+              if (diff > Math.PI) diff = Math.PI * 2 - diff;
+              
+              if (diff < 0.05 && dist < 1000 && dist > 50) {
+                if (currentTime % 200 < 20) handlePlayerHit();
+                shake.current = 5;
+              }
+            }
+          }
+
+          // General Boss Shooting
           let shootInterval = enemy.phase === 3 ? 600 : enemy.phase === 2 ? 1000 : 1500;
-          if (currentStage === 5) shootInterval *= 0.7;
-          
           if (currentTime - (enemy.lastShotTime || 0) > shootInterval) {
             enemy.lastShotTime = currentTime;
             audio.playEnemyShoot(enemy.x + enemy.width / 2);
-
-            if (currentStage === 3 && !enemy.isTractorBeaming) {
-              const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
-              const dy = playerPos.current.y - (enemy.y + enemy.height);
-              const dist = Math.sqrt(dx * dx + dy * dy);
-              for (let i = -1; i <= 1; i++) {
-                enemyBullets.current.push({
-                  x: enemy.x + enemy.width / 2,
-                  y: enemy.y + enemy.height,
-                  vx: (dx / dist) * 4 + i * 0.5,
-                  vy: (dy / dist) * 4
-                });
-              }
-            } else if (currentStage === 5) {
-              if (enemy.phase === 1) {
-                const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
-                const dy = playerPos.current.y - (enemy.y + enemy.height);
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                for (let i = -2; i <= 2; i++) {
-                  enemyBullets.current.push({
-                    x: enemy.x + enemy.width / 2,
-                    y: enemy.y + enemy.height,
-                    vx: (dx / dist) * 3 + i * 0.5,
-                    vy: (dy / dist) * 3
-                  });
-                }
-              } else if (enemy.phase === 2) {
-                for (let i = 0; i < 4; i++) {
-                  const angle = (currentTime / 200) + (i * Math.PI / 2);
-                  enemyBullets.current.push({
-                    x: enemy.x + enemy.width / 2,
-                    y: enemy.y + enemy.height / 2,
-                    vx: Math.cos(angle) * 3,
-                    vy: Math.sin(angle) * 3
-                  });
-                }
-              } else if (enemy.phase === 3) {
-                for (let i = 0; i < 12; i++) {
-                  const angle = (i / 12) * Math.PI * 2;
-                  enemyBullets.current.push({
-                    x: enemy.x + enemy.width / 2,
-                    y: enemy.y + enemy.height / 2,
-                    vx: Math.cos(angle) * 4,
-                    vy: Math.sin(angle) * 4
-                  });
-                }
-              }
+            // Spread shot
+            const count = enemy.phase === 3 ? 7 : 5;
+            for (let i = 0; i < count; i++) {
+              const angle = (Math.PI / count) * i + Math.PI / 4;
+              enemyBullets.current.push({
+                x: enemy.x + enemy.width / 2,
+                y: enemy.y + enemy.height,
+                vx: Math.cos(angle) * 4,
+                vy: Math.sin(angle) * 4
+              });
             }
           }
         }
@@ -2636,6 +2671,42 @@ export default function App() {
         ctx.fillStyle = 'rgba(26, 26, 46, 0.8)';
         ctx.fillRect(0, 0, block.width, block.height);
         ctx.strokeRect(0, 0, block.width, block.height);
+      } else if (block.type === 'TENTACLE' && block.segments) {
+        // Draw Tentacle Segments
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        block.segments.forEach((seg, i) => {
+          const size = 20 - i * 1.5;
+          ctx.lineTo(seg.x, seg.y);
+          ctx.stroke();
+          
+          // Segment glow
+          ctx.save();
+          ctx.translate(seg.x, seg.y);
+          ctx.rotate(seg.angle);
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.6;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, size, size * 0.8, 0, 0, Math.PI * 2);
+          ctx.fill();
+          
+          // Spikes
+          if (i % 2 === 0) {
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(size, 0);
+            ctx.lineTo(size + 10, 0);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(-size, 0);
+            ctx.lineTo(-size - 10, 0);
+            ctx.stroke();
+          }
+          ctx.restore();
+        });
       } else {
         ctx.strokeRect(2, 2, block.width - 4, block.height - 4);
         // Inner details
@@ -2807,38 +2878,83 @@ export default function App() {
       
       if (enemy.isBoss) {
         // Boss Rendering
-        const color = '#ff3366';
+        const color = enemy.bossType === BossType.LASER ? '#00ffcc' : '#ff3366';
         const pulse = Math.sin(Date.now() / 150) * 10;
         ctx.shadowBlur = 20 + pulse;
         ctx.shadowColor = color;
         ctx.strokeStyle = color;
         ctx.lineWidth = 4;
 
-        // Main Body (Large Hexagon-like)
-        if (enemy.isFinalBoss) {
-          ctx.strokeStyle = '#00ffcc';
-          ctx.shadowColor = '#00ffcc';
-          ctx.lineWidth = 6;
+        if (enemy.bossType === BossType.TRACTOR) {
+          // Main Body (Large Hexagon-like)
           ctx.beginPath();
-          ctx.arc(0, 0, 70 + pulse, 0, Math.PI * 2);
+          ctx.moveTo(0, -enemy.height / 2);
+          ctx.lineTo(enemy.width / 2, -enemy.height / 4);
+          ctx.lineTo(enemy.width / 2, enemy.height / 4);
+          ctx.lineTo(0, enemy.height / 2);
+          ctx.lineTo(-enemy.width / 2, enemy.height / 4);
+          ctx.lineTo(-enemy.width / 2, -enemy.height / 4);
+          ctx.closePath();
           ctx.stroke();
-          ctx.strokeStyle = color; // Reset for main body
-        }
-        ctx.beginPath();
-        ctx.moveTo(0, -enemy.height / 2);
-        ctx.lineTo(enemy.width / 2, -enemy.height / 4);
-        ctx.lineTo(enemy.width / 2, enemy.height / 4);
-        ctx.lineTo(0, enemy.height / 2);
-        ctx.lineTo(-enemy.width / 2, enemy.height / 4);
-        ctx.lineTo(-enemy.width / 2, -enemy.height / 4);
-        ctx.closePath();
-        ctx.stroke();
 
-        // Inner details
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, 0, 20 + pulse / 2, 0, Math.PI * 2);
-        ctx.stroke();
+          // Inner details
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, 0, 20 + pulse / 2, 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (enemy.bossType === BossType.SWARM) {
+          // Spiky Organic Shape
+          ctx.beginPath();
+          for (let i = 0; i < 12; i++) {
+            const angle = (i / 12) * Math.PI * 2;
+            const r = (i % 2 === 0 ? enemy.width / 2 : enemy.width / 3) + pulse;
+            ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+          }
+          ctx.closePath();
+          ctx.stroke();
+          
+          // Core
+          ctx.fillStyle = '#ffcc00';
+          ctx.beginPath();
+          ctx.arc(0, 0, 15 + pulse / 2, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (enemy.bossType === BossType.LASER) {
+          // Core with rotating outer rings
+          ctx.beginPath();
+          ctx.arc(0, 0, 40 + pulse, 0, Math.PI * 2);
+          ctx.stroke();
+          
+          // Rotating Rings
+          const angleOffset = (Date.now() / 1000) * Math.PI;
+          for (let i = 0; i < 3; i++) {
+            ctx.save();
+            ctx.rotate(angleOffset * (i + 1) * 0.5);
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 60 + i * 20, 30 + i * 10, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          }
+          
+          // Draw Lasers
+          if (enemy.phase! >= 1) {
+            const angle = (enemy.tractorBeamTimer! / 1000) * Math.PI;
+            const laserCount = enemy.phase === 3 ? 4 : 2;
+            ctx.save();
+            ctx.lineWidth = 10 + Math.sin(Date.now() / 50) * 5;
+            ctx.strokeStyle = '#00ffff';
+            ctx.shadowBlur = 30;
+            ctx.shadowColor = '#00ffff';
+            for (let i = 0; i < laserCount; i++) {
+              const laserAngle = angle + (i * Math.PI * 2 / laserCount);
+              ctx.beginPath();
+              ctx.moveTo(0, 0);
+              ctx.lineTo(Math.cos(laserAngle) * 1000, Math.sin(laserAngle) * 1000);
+              ctx.stroke();
+            }
+            ctx.restore();
+          }
+        }
 
         // Phase indicators
         if (enemy.phase! >= 2) {
@@ -2854,9 +2970,9 @@ export default function App() {
         }
 
         // Tractor Beam Rendering
-        if (enemy.isTractorBeaming || (enemy.tractorBeamTimer > 2500 && waveRef.current === 6)) {
+        if (enemy.bossType === BossType.TRACTOR && (enemy.isTractorBeaming || (enemy.tractorBeamTimer! > 2500))) {
           ctx.save();
-          const isCharging = enemy.tractorBeamTimer > 2500 && !enemy.isTractorBeaming;
+          const isCharging = enemy.tractorBeamTimer! > 2500 && !enemy.isTractorBeaming;
           const beamWidth = isCharging ? 4 : 120 + Math.sin(Date.now() / 50) * 20;
           const beamAlpha = isCharging ? 0.3 : 0.8;
           
@@ -3432,7 +3548,7 @@ export default function App() {
               </div>
               <div className="w-24 h-1 bg-white/10 rounded-full overflow-hidden">
                 <motion.div 
-                  animate={{ width: `${(survivalTime / 45) * 100}%` }}
+                  animate={{ width: `${(survivalTime / 30) * 100}%` }}
                   className="h-full bg-[#00ffcc]"
                 />
               </div>
