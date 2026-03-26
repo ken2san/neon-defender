@@ -195,10 +195,10 @@ export default function App() {
   const integrityRef = useRef(100);
   const [level, setLevel] = useState(1);
   const [xp, setXp] = useState(0);
-  const [xpToNextLevel, setXpToNextLevel] = useState(100);
+  const [xpToNextLevel, setXpToNextLevel] = useState(200);
   const levelRef = useRef(1);
   const xpRef = useRef(0);
-  const xpToNextLevelRef = useRef(100);
+  const xpToNextLevelRef = useRef(200);
 
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [upgradeOptions, setUpgradeOptions] = useState<{id: string, label: string, desc: string}[]>([]);
@@ -612,7 +612,7 @@ export default function App() {
   const handleScrapCollection = (s: Scrap) => {
     setScrapCount(prev => prev + 1);
     setScore(prev => prev + 10);
-    const xpGain = 15; // Increased XP gain
+    const xpGain = 10; // Balanced XP gain
     xpRef.current += xpGain;
     setXp(xpRef.current);
 
@@ -625,7 +625,7 @@ export default function App() {
     if (xpRef.current >= xpToNextLevelRef.current) {
       xpRef.current -= xpToNextLevelRef.current;
       levelRef.current += 1;
-      xpToNextLevelRef.current = Math.floor(xpToNextLevelRef.current * 1.2);
+      xpToNextLevelRef.current = Math.floor(xpToNextLevelRef.current * 1.5);
       
       setLevel(levelRef.current);
       setXp(xpRef.current);
@@ -654,6 +654,32 @@ export default function App() {
     audio.playUpgrade();
   };
 
+  const startNextWave = () => {
+    setGameState('PLAYING');
+    waveRef.current += 1;
+    setWave(waveRef.current);
+    
+    const stage = Math.min(5, Math.ceil(waveRef.current / 2));
+    const sector = ((waveRef.current - 1) % 2) + 1;
+    const stageNames = ["Tutorial", "Asteroid Belt", "Heavy Fire", "Chase", "Final Front"];
+    setSectorName(`${stageNames[stage - 1]} - SECTOR ${sector}`);
+    
+    initEnemies(waveRef.current);
+    
+    survivalTimerRef.current = 30;
+    setSurvivalTime(30);
+    blocks.current = [];
+    
+    setWaveTitle(true);
+    audio.playStageStart();
+    setTimeout(() => setWaveTitle(false), 2000);
+    
+    setTimeout(() => {
+      isWarping.current = false;
+      warpFactor.current = 0;
+    }, 1000);
+  };
+
   const triggerRelicSelection = () => {
     const allRelics = [
       { id: 'CHAIN', label: 'Tesla Arc', desc: 'Bullets jump between nearby enemies.' },
@@ -666,9 +692,9 @@ export default function App() {
       { id: 'EMP', label: 'EMP Burst', desc: 'Chance to stun enemies on hit.' },
     ];
 
-    // Pick 3 random
+    // Pick 4 random (increased choice since it's rarer)
     const shuffled = [...allRelics].sort(() => 0.5 - Math.random());
-    setUpgradeOptions(shuffled.slice(0, 3));
+    setUpgradeOptions(shuffled.slice(0, 4));
     setShowUpgrade(true);
     setGameState('RELIC_SELECT');
     audio.playUpgrade();
@@ -726,29 +752,7 @@ export default function App() {
     if (gameState === 'UPGRADE') {
       setGameState('PLAYING');
     } else {
-      setGameState('PLAYING');
-      waveRef.current += 1;
-      setWave(waveRef.current);
-      
-      const stage = Math.min(5, Math.ceil(waveRef.current / 2));
-      const sector = ((waveRef.current - 1) % 2) + 1;
-      const stageNames = ["Tutorial", "Asteroid Belt", "Heavy Fire", "Chase", "Final Front"];
-      setSectorName(`${stageNames[stage - 1]} - SECTOR ${sector}`);
-      
-      initEnemies(waveRef.current);
-      
-      survivalTimerRef.current = 30;
-      setSurvivalTime(30);
-      blocks.current = [];
-      
-      setWaveTitle(true);
-      audio.playStageStart();
-      setTimeout(() => setWaveTitle(false), 2000);
-      
-      setTimeout(() => {
-        isWarping.current = false;
-        warpFactor.current = 0;
-      }, 1000);
+      startNextWave();
     }
   };
 
@@ -865,7 +869,8 @@ export default function App() {
     relicsRef.current = [];
     levelRef.current = 1;
     xpRef.current = 0;
-    xpToNextLevelRef.current = 100;
+    xpToNextLevelRef.current = 200;
+    setXpToNextLevel(200);
     setShowUpgrade(false);
     setBossHealth(null);
     firepowerRef.current = 1;
@@ -1324,7 +1329,14 @@ export default function App() {
       
       if (survivalTimerRef.current <= 0) {
         setGameState('STAGE_CLEAR');
-        triggerRelicSelection();
+        if (waveRef.current % 2 === 0) {
+          triggerRelicSelection();
+        } else {
+          // End of Stage 1, skip relic selection, just warp to Stage 2
+          setTimeout(() => {
+            startNextWave();
+          }, 1500);
+        }
         isWarping.current = true;
         warpStartTime.current = Date.now();
       }
@@ -2405,9 +2417,12 @@ export default function App() {
       obstacles.current = [];
 
       setTimeout(() => {
-        // Show Relic Selection (VS Style)
-        triggerRelicSelection();
-        pauseStartTime.current = Date.now();
+        if (waveRef.current % 2 === 0) {
+          triggerRelicSelection();
+          pauseStartTime.current = Date.now();
+        } else {
+          startNextWave();
+        }
       }, 1500);
     }
 
