@@ -1059,6 +1059,21 @@ export default function App() {
 
   // Game Loop
   const update = () => {
+    // Warp logic should run even if not in PLAYING state (e.g. STAGE_CLEAR)
+    if (isWarping.current) {
+      const elapsed = Date.now() - warpStartTime.current;
+      if (elapsed < 1500) {
+        warpFactor.current = Math.min(1, warpFactor.current + 0.05);
+        glitch.current = Math.max(glitch.current, warpFactor.current * 15);
+        shake.current = Math.max(shake.current, warpFactor.current * 5);
+        if (elapsed < 100 && flash.current < 0.5) flash.current = 0.8; // Initial warp flash
+      } else {
+        warpFactor.current = Math.max(0, warpFactor.current - 0.02);
+      }
+    } else {
+      warpFactor.current = Math.max(0, warpFactor.current - 0.05);
+    }
+
     if (gameState !== 'PLAYING' || showUpgrade) return;
 
     const currentStage = Math.min(5, Math.ceil(waveRef.current / 2));
@@ -1936,6 +1951,9 @@ export default function App() {
             enemy.x += enemy.diveX + Math.sin(enemy.diveTime / 10) * 4;
           } else if (enemy.diveType === 'sweep') {
             enemy.x += enemy.diveX + Math.sin(enemy.diveTime / 40) * 6;
+          } else if (enemy.diveType === 'sine') {
+            enemy.x += enemy.diveX + Math.sin(enemy.diveTime / 15) * 8;
+            enemy.y += currentEnemyDiveSpeed * 0.8;
           } else if (enemy.diveType === 'spread') {
             enemy.x += enemy.diveX;
           } else {
@@ -2402,11 +2420,13 @@ export default function App() {
       if (ambushTimer.current > 10000) { // Every 10 seconds
         ambushTimer.current = 0;
         const side = Math.random() > 0.5 ? -50 : CANVAS_WIDTH + 50;
+        const diveType = Math.random() > 0.5 ? 'sine' : 'normal';
         for(let i=0; i<3; i++) {
           const e: Enemy = {
             x: side, y: 100 + i * 100, width: 35, height: 35, alive: true, type: 2,
             isDiving: true, isReturning: false, diveX: side < 0 ? 6 : -6, diveY: 2,
-            originX: side, originY: 100 + i * 100, state: 'DIVING', tractorBeamTimer: 0, isTractorBeaming: false, tractorBeamX: 0, stunnedUntil: 0
+            originX: side, originY: 100 + i * 100, state: 'DIVING', tractorBeamTimer: 0, isTractorBeaming: false, tractorBeamX: 0, stunnedUntil: 0,
+            diveType: diveType as any
           };
           enemies.current.push(e);
         }
@@ -2419,6 +2439,7 @@ export default function App() {
       pauseStartTime.current = Date.now();
       audio.playWaveClear();
       audio.playWarp();
+      flash.current = 1.0; // Warp start flash
       
       // Clear bullets
       bullets.current = [];
@@ -2433,19 +2454,6 @@ export default function App() {
           startNextWave();
         }
       }, 1500);
-    }
-
-    // Update Warp Factor
-    if (isWarping.current) {
-      const elapsed = Date.now() - warpStartTime.current;
-      if (elapsed < 1500) {
-        warpFactor.current = Math.min(1, warpFactor.current + 0.05);
-        glitch.current = Math.max(glitch.current, warpFactor.current * 10);
-      } else {
-        warpFactor.current = Math.max(0, warpFactor.current - 0.02);
-      }
-    } else {
-      warpFactor.current = Math.max(0, warpFactor.current - 0.05);
     }
 
     // Decay effects
@@ -2696,13 +2704,17 @@ export default function App() {
         ctx.fillRect(0, 0, block.width, block.height);
         ctx.strokeRect(0, 0, block.width, block.height);
       } else if (block.type === 'TENTACLE' && block.segments) {
-        // Draw Tentacle Segments
-        ctx.lineWidth = 3;
+        // Draw Tentacle Segments (R-Type style)
+        ctx.lineWidth = 4;
         ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(0, 0);
+        
+        const time = Date.now() / 1000;
+        const pulse = Math.sin(time * 5 + block.id) * 0.2 + 0.8;
+
         block.segments.forEach((seg, i) => {
-          const size = 20 - i * 1.5;
+          const size = (25 - i * 2) * pulse;
           ctx.lineTo(seg.x, seg.y);
           ctx.stroke();
           
@@ -2710,23 +2722,34 @@ export default function App() {
           ctx.save();
           ctx.translate(seg.x, seg.y);
           ctx.rotate(seg.angle);
-          ctx.fillStyle = color;
-          ctx.globalAlpha = 0.6;
+          
+          const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size);
+          gradient.addColorStop(0, color);
+          gradient.addColorStop(1, 'transparent');
+          ctx.fillStyle = gradient;
+          ctx.globalAlpha = 0.4 + Math.sin(time * 3 + i) * 0.2;
           ctx.beginPath();
-          ctx.ellipse(0, 0, size, size * 0.8, 0, 0, Math.PI * 2);
+          ctx.arc(0, 0, size, 0, Math.PI * 2);
+          ctx.fill();
+          
+          // Core
+          ctx.fillStyle = '#ffffff';
+          ctx.globalAlpha = 0.8;
+          ctx.beginPath();
+          ctx.arc(0, 0, size * 0.3, 0, Math.PI * 2);
           ctx.fill();
           
           // Spikes
           if (i % 2 === 0) {
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 1;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
             ctx.beginPath();
             ctx.moveTo(size, 0);
-            ctx.lineTo(size + 10, 0);
+            ctx.lineTo(size + 15, -5);
             ctx.stroke();
             ctx.beginPath();
             ctx.moveTo(-size, 0);
-            ctx.lineTo(-size - 10, 0);
+            ctx.lineTo(-size - 15, 5);
             ctx.stroke();
           }
           ctx.restore();
@@ -3277,6 +3300,28 @@ export default function App() {
 
     // Final Post-Processing to Main Canvas
     mainCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Radial Warp Streaks (R-Type style)
+    if (warpFactor.current > 0.1) {
+      mainCtx.save();
+      mainCtx.translate(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+      for (let i = 0; i < 30; i++) {
+        const angle = (i / 30) * Math.PI * 2 + Date.now() * 0.005;
+        const len = 100 + Math.random() * 600 * warpFactor.current;
+        mainCtx.rotate(angle);
+        const grad = mainCtx.createLinearGradient(0, 0, 0, len);
+        grad.addColorStop(0, 'transparent');
+        grad.addColorStop(0.5, `rgba(0, 255, 204, ${warpFactor.current * 0.4})`);
+        grad.addColorStop(1, 'transparent');
+        mainCtx.strokeStyle = grad;
+        mainCtx.lineWidth = 3;
+        mainCtx.beginPath();
+        mainCtx.moveTo(0, 50);
+        mainCtx.lineTo(0, 50 + len);
+        mainCtx.stroke();
+      }
+      mainCtx.restore();
+    }
     
     // Chromatic Aberration
     const caIntensity = (isOverdriveActiveRef.current ? 4 : 0) + (warpFactor.current * 15) + (glitch.current * 0.5);

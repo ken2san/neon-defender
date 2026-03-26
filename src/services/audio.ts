@@ -503,40 +503,103 @@ class RetroAudio {
 
     const bassNotes = [130.81, 130.81, 155.56, 174.61, 130.81, 130.81, 196.00, 174.61];
     const leadNotes = [0, 261.63, 311.13, 349.23, 0, 392.00, 349.23, 311.13];
-    const speed = 160;
+    const speed = 125; // 120 BPM (125ms per 16th note)
 
     this.bgmInterval = window.setInterval(() => {
       if (!this.ctx || !this.masterGain) return;
       
-      const bassFreq = bassNotes[this.bgmStep % bassNotes.length];
-      const leadFreq = leadNotes[this.bgmStep % leadNotes.length];
-      this.bgmStep++;
+      const step = this.bgmStep % 16;
+      const bassFreq = bassNotes[Math.floor(step / 2) % bassNotes.length];
+      const leadFreq = leadNotes[Math.floor(step / 2) % leadNotes.length];
+      
+      // Kick Drum on 1, 5, 9, 13
+      if (step % 4 === 0) {
+        const kickOsc = this.ctx.createOscillator();
+        const kickGain = this.ctx.createGain();
+        kickOsc.type = 'sine';
+        kickOsc.frequency.setValueAtTime(150, this.ctx.currentTime);
+        kickOsc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.1);
+        kickGain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+        kickGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.1);
+        kickOsc.connect(kickGain);
+        kickGain.connect(this.masterGain);
+        kickOsc.start();
+        kickOsc.stop(this.ctx.currentTime + 0.1);
 
-      // Bass
-      const bassOsc = this.ctx.createOscillator();
-      const bassGain = this.ctx.createGain();
-      bassOsc.type = 'square';
-      bassOsc.frequency.setValueAtTime(bassFreq, this.ctx.currentTime);
-      bassGain.gain.setValueAtTime(0.06, this.ctx.currentTime);
-      bassGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + (speed / 1000) * 0.9);
-      bassOsc.connect(bassGain);
-      bassGain.connect(this.masterGain);
-      bassOsc.start();
-      bassOsc.stop(this.ctx.currentTime + (speed / 1000));
+        // Add a bit of noise for the "click"
+        const noiseBuffer = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.02, this.ctx.sampleRate);
+        const noiseData = noiseBuffer.getChannelData(0);
+        for(let i=0; i<noiseData.length; i++) noiseData[i] = Math.random() * 2 - 1;
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = noiseBuffer;
+        const noiseGain = this.ctx.createGain();
+        noiseGain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.02);
+        noise.connect(noiseGain);
+        noiseGain.connect(this.masterGain);
+        noise.start();
+      }
 
-      // Lead (every other beat or so)
-      if (leadFreq > 0 && this.bgmStep % 2 === 0) {
+      // Snare/Hi-hat on 3, 7, 11, 15
+      if (step % 4 === 2) {
+        const hatBuffer = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.05, this.ctx.sampleRate);
+        const hatData = hatBuffer.getChannelData(0);
+        for(let i=0; i<hatData.length; i++) hatData[i] = Math.random() * 2 - 1;
+        const hat = this.ctx.createBufferSource();
+        hat.buffer = hatBuffer;
+        const hatGain = this.ctx.createGain();
+        hatGain.gain.setValueAtTime(0.05, this.ctx.currentTime);
+        hatGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.05);
+        hat.connect(hatGain);
+        hatGain.connect(this.masterGain);
+        hat.start();
+      }
+
+      // Bass on every 8th note
+      if (step % 2 === 0) {
+        const bassOsc = this.ctx.createOscillator();
+        const bassGain = this.ctx.createGain();
+        bassOsc.type = 'sawtooth';
+        
+        // Low pass filter for the bass
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = 400;
+
+        bassOsc.frequency.setValueAtTime(bassFreq / 2, this.ctx.currentTime);
+        bassGain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+        bassGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.1);
+        
+        bassOsc.connect(filter);
+        filter.connect(bassGain);
+        bassGain.connect(this.masterGain);
+        bassOsc.start();
+        bassOsc.stop(this.ctx.currentTime + 0.1);
+      }
+
+      // Lead (syncopated)
+      if (leadFreq > 0 && (step % 3 === 0 || step === 7 || step === 14)) {
         const leadOsc = this.ctx.createOscillator();
         const leadGain = this.ctx.createGain();
-        leadOsc.type = 'triangle';
+        leadOsc.type = 'square';
+        
+        const leadFilter = this.ctx.createBiquadFilter();
+        leadFilter.type = 'bandpass';
+        leadFilter.frequency.value = 1000 + Math.sin(this.bgmStep * 0.1) * 500;
+        leadFilter.Q.value = 5;
+
         leadOsc.frequency.setValueAtTime(leadFreq, this.ctx.currentTime);
-        leadGain.gain.setValueAtTime(0.04, this.ctx.currentTime);
-        leadGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + (speed / 1000) * 1.5);
-        leadOsc.connect(leadGain);
+        leadGain.gain.setValueAtTime(0.03, this.ctx.currentTime);
+        leadGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.2);
+        
+        leadOsc.connect(leadFilter);
+        leadFilter.connect(leadGain);
         leadGain.connect(this.masterGain);
         leadOsc.start();
-        leadOsc.stop(this.ctx.currentTime + (speed / 1000) * 1.5);
+        leadOsc.stop(this.ctx.currentTime + 0.2);
       }
+
+      this.bgmStep++;
     }, speed);
   }
 
