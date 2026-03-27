@@ -267,21 +267,67 @@ class RetroAudio {
 
   playWarp() {
     if (!this.ctx || !this.masterGain) return;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.type = 'sine';
+    const duration = 1.6;
     
-    osc.frequency.setValueAtTime(100, this.ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(2000, this.ctx.currentTime + 1.5);
+    // Rising tone
+    const osc1 = this.ctx.createOscillator();
+    const gain1 = this.ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(100, this.ctx.currentTime);
+    osc1.frequency.exponentialRampToValueAtTime(3000, this.ctx.currentTime + duration);
+    gain1.gain.setValueAtTime(0.2, this.ctx.currentTime);
+    gain1.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+    osc1.connect(gain1);
+    gain1.connect(this.masterGain);
     
-    gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 1.5);
+    // Shearing sawtooth
+    const osc2 = this.ctx.createOscillator();
+    const gain2 = this.ctx.createGain();
+    osc2.type = 'sawtooth';
+    osc2.frequency.setValueAtTime(50, this.ctx.currentTime);
+    osc2.frequency.exponentialRampToValueAtTime(400, this.ctx.currentTime + duration);
     
-    osc.connect(gain);
-    gain.connect(this.masterGain);
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(2000, this.ctx.currentTime);
+    filter.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + duration);
     
-    osc.start();
-    osc.stop(this.ctx.currentTime + 1.5);
+    gain2.gain.setValueAtTime(0.1, this.ctx.currentTime);
+    gain2.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+    
+    osc2.connect(filter);
+    filter.connect(gain2);
+    gain2.connect(this.masterGain);
+    
+    // Noise burst for "rushing" feel
+    const bufferSize = this.ctx.sampleRate * duration;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    const noiseGain = this.ctx.createGain();
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.setValueAtTime(100, this.ctx.currentTime);
+    noiseFilter.frequency.exponentialRampToValueAtTime(5000, this.ctx.currentTime + duration);
+    
+    noiseGain.gain.setValueAtTime(0, this.ctx.currentTime);
+    noiseGain.gain.linearRampToValueAtTime(0.15, this.ctx.currentTime + 0.2);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+    
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+
+    osc1.start();
+    osc2.start();
+    noise.start();
+    
+    osc1.stop(this.ctx.currentTime + duration);
+    osc2.stop(this.ctx.currentTime + duration);
   }
 
   playWaveClear() {
