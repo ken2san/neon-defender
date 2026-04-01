@@ -767,7 +767,41 @@ export default function App() {
     audio.playUpgrade();
   };
 
+  const resetInputGestureState = () => {
+    if (pointerTapTimer.current !== null) {
+      window.clearTimeout(pointerTapTimer.current);
+      pointerTapTimer.current = null;
+    }
+    if (virtualDragReleaseTimer.current !== null) {
+      window.clearTimeout(virtualDragReleaseTimer.current);
+      virtualDragReleaseTimer.current = null;
+    }
+    if (idleFireTimer.current !== null) {
+      window.clearTimeout(idleFireTimer.current);
+      idleFireTimer.current = null;
+    }
+
+    isMouseDown.current = false;
+    isTouching.current = false;
+    isSlingshotMode.current = false;
+    isSlingshotCharged.current = false;
+    isVirtualDragActive.current = false;
+
+    mouseAnchorPos.current = null;
+    slingshotArmed.current = false;
+    slingshotArmedExpiry.current = 0;
+    slingshotArmedPos.current = null;
+    touchPoints.current = {};
+
+    lastTapTime.current = 0;
+    lastMouseTapTime.current = 0;
+    lastPointerTapTime.current = 0;
+    inputVel.current = { x: 0, y: 0 };
+    inputHistory.current = [];
+  };
+
   const startNextWave = () => {
+    resetInputGestureState();
     if (isOverdriveActiveRef.current && pauseStartTime.current > 0) {
       overdriveEndTime.current += (Date.now() - pauseStartTime.current);
     }
@@ -784,8 +818,9 @@ export default function App() {
 
     initEnemies(waveRef.current);
 
+    stageStartTime.current = 0;
     survivalTimerRef.current = 30;
-    setSurvivalTime(30);
+    setSurvivalTime(stage === 2 ? 45 : 30);
     blocks.current = [];
 
     setWaveTitle(true);
@@ -988,6 +1023,7 @@ export default function App() {
   const startGame = () => {
     audio.init();
     audio.playBGM(1);
+    resetInputGestureState();
     setScore(0);
     setWave(1);
     setSectorName('Tutorial - SECTOR 1');
@@ -2066,27 +2102,6 @@ export default function App() {
     if (regenRef.current > 0 && integrityRef.current < 100) {
       integrityRef.current = Math.min(100, integrityRef.current + (regenRef.current * 0.01));
       setIntegrity(integrityRef.current);
-    }
-
-    // Survival Timer Logic
-    if (!isWarping.current) {
-      survivalTimerRef.current -= (16 / 1000) * timeScale.current;
-      setSurvivalTime(Math.max(0, Math.floor(survivalTimerRef.current)));
-
-      if (survivalTimerRef.current <= 0) {
-        setGameState('STAGE_CLEAR');
-        pauseStartTime.current = Date.now();
-        if (waveRef.current % 2 === 0) {
-          triggerRelicSelection();
-        } else {
-          // End of Stage 1, skip relic selection, just warp to Stage 2
-          setTimeout(() => {
-            startNextWave();
-          }, 1500);
-        }
-        isWarping.current = true;
-        warpStartTime.current = Date.now();
-      }
     }
 
     // Maze Generation (Canyon)
