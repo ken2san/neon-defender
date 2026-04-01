@@ -14,12 +14,12 @@ const CANVAS_WIDTH = 600;
 const CANVAS_HEIGHT = 800;
 const PLAYER_WIDTH = 50;
 const PLAYER_HEIGHT = 50;
-const PLAYER_SPEED = 3.5; // Reduced from 5.0
-const FOLLOW_SMOOTHNESS = 0.15;
+const PLAYER_SPEED = 3.5; 
+const SLINGSHOT_THRESHOLD = 250; 
 const GRAZE_DISTANCE = 40;
 const MAX_OVERDRIVE = 100;
 const BULLET_SPEED = 8; // Synchronized speed
-const ENEMY_DIVE_SPEED = 2.5; // Synchronized speed
+const ENEMY_DIVE_SPEED = 3.0; // Slightly increased for better challenge balance
 const ENEMY_BULLET_SPEED = 3.5; // Synchronized speed
 const ENEMY_ROWS = 5;
 const ENEMY_COLS = 8;
@@ -307,12 +307,13 @@ export default function App() {
   const mouseAnchorPos = useRef<{ x: number, y: number } | null>(null);
   const currentMousePos = useRef({ x: 0, y: 0 });
   const playerStartPos = useRef({ x: 0, y: 0 });
+  const isSlingshotCharged = useRef(false);
+  const isSlingshotMode = useRef(false);
   const isTouching = useRef(false);
   const isMouseDown = useRef(false);
   const touchPoints = useRef<Record<number, { x: number, y: number }>>({});
   const lastTapTime = useRef(0);
   const slingshotAttackUntil = useRef(0);
-  const slingshotBonusPower = useRef(0); // Power accumulated by grazing while dragging
 
   // Power-up & Overdrive State
   const powerUps = useRef<PowerUp[]>([]);
@@ -335,6 +336,8 @@ export default function App() {
   const obstaclePattern = useRef(0);
   const warpFactor = useRef(0);
   const warpStartTime = useRef(0);
+  const slingshotTrails = useRef<{x: number, y: number, alpha: number}[]>([]);
+  const slingshotTrajectory = useRef<{x1: number, y1: number, x2: number, y2: number, alpha: number} | null>(null);
   const tailSegments = useRef<TailSegment[]>([]);
   const followerHistory = useRef<{x: number, y: number}[]>([]);
   const isHackedRef = useRef(false);
@@ -347,6 +350,8 @@ export default function App() {
 
   // Initialize stars and offscreen canvas
   useEffect(() => {
+    window.addEventListener('contextmenu', (e) => e.preventDefault());
+    
     stars.current = Array.from({ length: 100 }, () => ({
       x: Math.random() * CANVAS_WIDTH,
       y: Math.random() * CANVAS_HEIGHT,
@@ -1031,6 +1036,20 @@ export default function App() {
         e.preventDefault();
       }
       keysPressed.current[e.code] = true;
+
+      // Allow Ctrl to trigger Slingshot Mode during an active drag
+      if (!e.repeat && (e.code === 'ControlLeft' || e.code === 'ControlRight') && isMouseDown.current && !isSlingshotMode.current) {
+        isSlingshotMode.current = true;
+        mouseAnchorPos.current = { x: currentMousePos.current.x, y: currentMousePos.current.y };
+        playerStartPos.current = { x: playerPos.current.x, y: playerPos.current.y };
+        audio.playSlingshot?.();
+        shake.current = Math.max(shake.current, 5);
+        createExplosion(currentMousePos.current.x, currentMousePos.current.y, '#00ffcc', 20);
+        
+        // Brief time slow/freeze for tactile feedback
+        timeScale.current = 0.2;
+        setTimeout(() => { timeScale.current = 1.0; }, 100);
+      }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyS', 'KeyA', 'KeyD'].includes(e.code)) {
@@ -1044,7 +1063,7 @@ export default function App() {
       e.preventDefault();
       
       const now = Date.now();
-      const isDoubleTap = now - lastTapTime.current < 300;
+      const isDoubleTap = now - lastTapTime.current < 400;
       lastTapTime.current = now;
 
       for (let i = 0; i < e.changedTouches.length; i++) {
@@ -1064,10 +1083,27 @@ export default function App() {
       if (rect) {
         const x = ((touch.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
         const y = ((touch.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
+        touchStartPos.current = { x, y };
+        currentMousePos.current = { x, y };
+        // If double tap, enter Slingshot Mode and set anchor at SHIP position
+        if (isDoubleTap) {
+          isSlingshotMode.current = true;
+          mouseAnchorPos.current = { x, y }; // Use touch point as visual anchor
+          playerStartPos.current = { x: playerPos.current.x, y: playerPos.current.y };
+          audio.playSlingshot?.(); // Small feedback sound
+          shake.current = Math.max(shake.current, 5); // Stronger initial shake
+          createExplosion(x, y, '#00ffcc', 20); // Bigger visual ping
+          
+          // Brief time slow/freeze for tactile feedback
+          timeScale.current = 0.2;
+          setTimeout(() => { timeScale.current = 1.0; }, 100);
+        } else {
+          isSlingshotMode.current = false;
+          playerStartPos.current = { x: playerPos.current.x, y: playerPos.current.y };
+        }
+        inputHistory.current = [{ x, y, t: Date.now() }];
       }
 
-      touchStartPos.current = { x: touch.clientX, y: touch.clientY };
-      playerStartPos.current = { x: targetPos.current.x, y: targetPos.current.y };
       isTouching.current = true;
       keysPressed.current['TouchFire'] = true;
     };
@@ -1097,28 +1133,43 @@ export default function App() {
           }
         }
         
-        lastInputPos.current = { x, y };
-        lastInputTime.current = now;
         currentMousePos.current = { x, y };
-
-        // Tension Logic: Dampen movement when pulling away from anchor
-        const rawDx = (x - touchStartPos.current.x) * 1.5;
-        const rawDy = (y - touchStartPos.current.y) * 1.5;
         
-        // If pulling "down" (slingshot charge), dampen horizontal movement to prevent "sliding"
-        const isPullingDown = rawDy > 20;
-        const hDamp = isPullingDown ? 0.4 : 1.0;
-        
-        // Apply "Rubber Band" resistance: The further you pull, the less the ship moves
-        const dist = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
-        const resistance = dist > 50 ? 0.5 : 1.0; 
+        if (isSlingshotMode.current && mouseAnchorPos.current) {
+          // SLINGSHOT MODE: Rubber band logic
+          const rawDx = (x - mouseAnchorPos.current.x);
+          const rawDy = (y - mouseAnchorPos.current.y);
+          const dist = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
+          
+          if (dist > 30) { // Small deadzone before charging
+            isSlingshotCharged.current = true;
+          }
 
-        targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + rawDx * hDamp * resistance));
-        targetPos.current.y = Math.max(CANVAS_HEIGHT * 0.2, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT - 20, playerStartPos.current.y + rawDy * resistance));
+          // Apply resistance
+          const resistance = 0.25;
+          const finalDx = rawDx * resistance;
+          const finalDy = rawDy * resistance;
+
+          targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + finalDx));
+          targetPos.current.y = Math.max(0, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerStartPos.current.y + finalDy));
+        } else {
+          // PRECISION MODE: 1:1 Movement
+          const rawDx = (x - touchStartPos.current.x);
+          const rawDy = (y - touchStartPos.current.y);
+          targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + rawDx));
+          targetPos.current.y = Math.max(0, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerStartPos.current.y + rawDy));
+        }
       }
     };
 
     const handleSlingshot = () => {
+      const anchor = mouseAnchorPos.current || (isTouching.current ? { x: touchStartPos.current.x, y: touchStartPos.current.y } : null);
+      if (!anchor) {
+        isSlingshotMode.current = false;
+        isSlingshotCharged.current = false;
+        return;
+      }
+
       const centerX = playerPos.current.x + PLAYER_WIDTH / 2;
       const centerY = playerPos.current.y + PLAYER_HEIGHT / 2;
       
@@ -1131,35 +1182,56 @@ export default function App() {
       const physicalDist = Math.sqrt(dx * dx + dy * dy);
 
       // Virtual Tension
-      const inputDx = (mouseAnchorPos.current?.x || touchStartPos.current.x) - currentMousePos.current.x;
-      const inputDy = (mouseAnchorPos.current?.y || touchStartPos.current.y) - currentMousePos.current.y;
-      const inputDist = Math.sqrt(inputDx * inputDx + inputDy * inputDy) * 1.5; 
+      const inputDx = anchor.x - currentMousePos.current.x;
+      const inputDy = anchor.y - currentMousePos.current.y;
+      const inputDist = Math.sqrt(inputDx * inputDx + inputDy * inputDy); 
+
+      // CANCEL CHECK: If released very close to anchor, don't fire
+      if (inputDist < 25) {
+        isSlingshotCharged.current = false;
+        isSlingshotMode.current = false;
+        return;
+      }
 
       const dist = Math.max(physicalDist, inputDist);
+      const mag = Math.sqrt(inputDx * inputDx + inputDy * inputDy) || 1;
+      const dirX = inputDx / mag;
+      const dirY = inputDy / mag;
 
-      // Reset targetPos to home immediately
-      targetPos.current = { x: playerStartPos.current.x, y: playerStartPos.current.y };
+      // If not charged or not in slingshot mode, just settle
+      if (!isSlingshotCharged.current || !isSlingshotMode.current) {
+        isSnapping.current = 0;
+        isSlingshotCharged.current = false;
+        isSlingshotMode.current = false;
+        return;
+      }
+
+      // Reset targetPos to dash destination (Free-Roam)
+      // Instead of returning to home, we dash forward
+      const dashDist = dist * 1.8; 
+      targetPos.current = { 
+        x: Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerPos.current.x + dirX * dashDist)),
+        y: Math.max(CANVAS_HEIGHT * 0.1, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerPos.current.y + dirY * dashDist))
+      };
 
       // Flick Detection
       const inputSpeed = Math.sqrt(inputVel.current.x ** 2 + inputVel.current.y ** 2);
       const isFlick = inputSpeed > 400; 
 
       // 1. DEADZONE / ADJUSTMENT MODE (Small pull)
-      if (dist < 70) {
-        if (isFlick && dist > 5) {
+      if (dist < SLINGSHOT_THRESHOLD + 30) {
+        if (isFlick && dist > 20) {
           const flickPower = Math.min(inputSpeed / 1000, 2.0);
-          const speed = 20 + flickPower * 35; 
+          const speed = 25 + flickPower * 40; 
           playerVel.current.x = (inputVel.current.x / inputSpeed) * speed;
           playerVel.current.y = (inputVel.current.y / inputSpeed) * speed;
           
           createExplosion(centerX, centerY, '#00ffcc', isMobile ? 3 : 6); 
           shake.current = Math.max(shake.current, 2);
           audio.playSlingshot?.();
-          isSnapping.current = 15; // Start snap phase
-        } else if (dist > 15) {
-          const speed = 15 + (dist / 70) * 20; 
-          const dirX = physicalDist > 5 ? dx / physicalDist : inputDx / (inputDist || 1);
-          const dirY = physicalDist > 5 ? dy / physicalDist : inputDy / (inputDist || 1);
+          isSnapping.current = 15; 
+        } else if (dist > 50) {
+          const speed = 15 + (dist / SLINGSHOT_THRESHOLD) * 25; 
           playerVel.current.x = dirX * speed;
           playerVel.current.y = dirY * speed;
           audio.playSlingshot?.();
@@ -1167,16 +1239,13 @@ export default function App() {
         }
       } 
       // 2. ATTACK MODE (Large pull)
-      else if (dist >= 70) {
-        const attackDist = dist - 70;
-        const tensionRatio = Math.min(attackDist / 150, 1.5);
-        const totalPower = Math.pow(tensionRatio, 2.0) + slingshotBonusPower.current; 
+      else if (dist >= SLINGSHOT_THRESHOLD + 30) {
+        const attackDist = dist - (SLINGSHOT_THRESHOLD + 30);
+        const tensionRatio = Math.min(attackDist / 350, 3.5);
+        const totalPower = Math.pow(tensionRatio, 1.7); 
         
-        const baseSnapSpeed = 35;
-        const speed = baseSnapSpeed + (totalPower * 55);
-        
-        const dirX = physicalDist > 5 ? dx / physicalDist : inputDx / (inputDist || 1);
-        const dirY = physicalDist > 5 ? dy / physicalDist : inputDy / (inputDist || 1);
+        const baseSnapSpeed = 45;
+        const speed = baseSnapSpeed + (totalPower * 85);
         
         // Combine with flick if in similar direction
         let finalVelX = dirX * speed;
@@ -1198,6 +1267,15 @@ export default function App() {
         invulnerableUntil.current = Date.now() + (attackDuration * 0.7);
         
         shake.current = Math.max(shake.current, 6 + totalPower * 15); 
+        
+        // Set trajectory visual
+        slingshotTrajectory.current = {
+          x1: playerPos.current.x + PLAYER_WIDTH / 2,
+          y1: playerPos.current.y + PLAYER_HEIGHT / 2,
+          x2: playerPos.current.x + PLAYER_WIDTH / 2 + dirX * 500,
+          y2: playerPos.current.y + PLAYER_HEIGHT / 2 + dirY * 500,
+          alpha: 1.0
+        };
         flash.current = totalPower > 0.8 ? 0.15 : 0; 
         
         audio.playSlingshot?.();
@@ -1205,7 +1283,7 @@ export default function App() {
         
         isSnapping.current = 20; // Longer snap phase for big attacks
 
-        const shockwaveRadius = 120 + (totalPower * 140);
+        const shockwaveRadius = 150 + (totalPower * 200);
         enemyBullets.current.forEach(b => {
           const bdx = b.x - centerX;
           const bdy = b.y - centerY;
@@ -1221,12 +1299,12 @@ export default function App() {
             createExplosion(playerPos.current.x + PLAYER_WIDTH/2, playerPos.current.y + PLAYER_HEIGHT/2, '#00ffcc', isMobile ? 4 : 15);
           }, i * 20);
         }
-
-        slingshotBonusPower.current = 0;
       }
       
       inputVel.current = { x: 0, y: 0 };
       inputHistory.current = [];
+      isSlingshotCharged.current = false;
+      isSlingshotMode.current = false; // Reset mode after fire
     };
 
     const handleTouchEnd = (e: TouchEvent) => {
@@ -1245,18 +1323,46 @@ export default function App() {
       
       const rect = canvasRef.current?.getBoundingClientRect();
       if (rect) {
-        // Check if click is actually inside the canvas
-        if (e.clientX < rect.left || e.clientX > rect.right || 
-            e.clientY < rect.top || e.clientY > rect.bottom) {
+        const now = Date.now();
+        const isDoubleClick = (now - lastTapTime.current < 500) || (e.detail >= 2);
+        const isRightClick = e.button === 2 || (e.button === 0 && e.ctrlKey);
+        lastTapTime.current = now;
+
+        // If already dragging and right-click/ctrl-click, force slingshot mode
+        if (isMouseDown.current && isRightClick) {
+          isSlingshotMode.current = true;
+          const x = ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
+          const y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
+          mouseAnchorPos.current = { x, y };
+          audio.playSlingshot?.();
+          shake.current = Math.max(shake.current, 5);
+          createExplosion(x, y, '#00ffcc', 20);
+          timeScale.current = 0.2;
+          setTimeout(() => { timeScale.current = 1.0; }, 100);
           return;
         }
 
         isMouseDown.current = true;
         const x = ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
         const y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
-        mouseAnchorPos.current = { x, y };
+        
         currentMousePos.current = { x, y };
-        playerStartPos.current = { x: targetPos.current.x, y: targetPos.current.y };
+        playerStartPos.current = { x: playerPos.current.x, y: playerPos.current.y };
+
+        if (isDoubleClick || isRightClick) {
+          isSlingshotMode.current = true;
+          mouseAnchorPos.current = { x, y };
+          audio.playSlingshot?.();
+          shake.current = Math.max(shake.current, 5);
+          createExplosion(x, y, '#00ffcc', 20);
+          
+          // Brief time slow/freeze for tactile feedback
+          timeScale.current = 0.2;
+          setTimeout(() => { timeScale.current = 1.0; }, 100);
+        } else {
+          isSlingshotMode.current = false;
+          mouseAnchorPos.current = { x, y }; // Still need anchor for relative movement
+        }
       }
     };
 
@@ -1268,40 +1374,28 @@ export default function App() {
         const x = ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
         const y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
         
-        // Track input velocity with smoothing
-        const now = Date.now();
-        inputHistory.current.push({ x, y, t: now });
-        if (inputHistory.current.length > 5) inputHistory.current.shift();
-        
-        if (inputHistory.current.length >= 2) {
-          const first = inputHistory.current[0];
-          const last = inputHistory.current[inputHistory.current.length - 1];
-          const dt = (last.t - first.t) / 1000;
-          if (dt > 0) {
-            inputVel.current.x = (last.x - first.x) / dt;
-            inputVel.current.y = (last.y - first.y) / dt;
-          }
-        }
-        
-        lastInputPos.current = { x, y };
-        lastInputTime.current = now;
         currentMousePos.current = { x, y };
 
         if (isMouseDown.current && mouseAnchorPos.current) {
-          // Tension Logic: Dampen movement when pulling away from anchor
-          const rawDx = (x - mouseAnchorPos.current.x) * 1.5;
-          const rawDy = (y - mouseAnchorPos.current.y) * 1.5;
-          
-          // If pulling "down" (slingshot charge), dampen horizontal movement to prevent "sliding"
-          const isPullingDown = rawDy > 20;
-          const hDamp = isPullingDown ? 0.4 : 1.0;
-          
-          // Apply "Rubber Band" resistance: The further you pull, the less the ship moves
-          const dist = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
-          const resistance = dist > 50 ? 0.5 : 1.0; 
+          if (isSlingshotMode.current) {
+            const rawDx = (x - mouseAnchorPos.current.x);
+            const rawDy = (y - mouseAnchorPos.current.y);
+            const dist = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
+            
+            if (dist > 30) isSlingshotCharged.current = true;
 
-          targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + rawDx * hDamp * resistance));
-          targetPos.current.y = Math.max(CANVAS_HEIGHT * 0.2, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT - 20, playerStartPos.current.y + rawDy * resistance));
+            const resistance = 0.25;
+            const finalDx = rawDx * resistance;
+            const finalDy = rawDy * resistance;
+
+            targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + finalDx));
+            targetPos.current.y = Math.max(0, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerStartPos.current.y + finalDy));
+          } else {
+            const rawDx = (x - mouseAnchorPos.current.x);
+            const rawDy = (y - mouseAnchorPos.current.y);
+            targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + rawDx));
+            targetPos.current.y = Math.max(0, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerStartPos.current.y + rawDy));
+          }
         }
       }
     };
@@ -1312,30 +1406,36 @@ export default function App() {
       mouseAnchorPos.current = null;
     };
 
+    const handleBlur = () => {
+      isMouseDown.current = false;
+      isTouching.current = false;
+      isSlingshotMode.current = false;
+      isSlingshotCharged.current = false;
+      mouseAnchorPos.current = null;
+      keysPressed.current = {};
+    };
+
     window.addEventListener('keydown', handleKeyDown, { passive: false });
     window.addEventListener('keyup', handleKeyUp, { passive: false });
     window.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('touchstart', handleTouchStart, { passive: false });
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleTouchEnd);
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('contextmenu', (e) => e.preventDefault()); // Prevent right-click menu
     
-    const canvas = canvasRef.current;
-    if (canvas) {
-      canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
-      window.addEventListener('touchmove', handleTouchMove, { passive: false });
-      window.addEventListener('touchend', handleTouchEnd);
-    }
-
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
-      if (canvas) {
-        canvas.removeEventListener('touchstart', handleTouchStart);
-        window.removeEventListener('touchmove', handleTouchMove);
-        window.removeEventListener('touchend', handleTouchEnd);
-      }
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+      window.removeEventListener('blur', handleBlur);
     };
   }, [gameState, showUpgrade]);
 
@@ -1345,19 +1445,6 @@ export default function App() {
       grazeCount.current++;
       setScore(s => s + 10);
       
-      // If grazing WHILE dragging a slingshot, absorb kinetic energy!
-      const isDragging = isMouseDown.current || isTouching.current;
-      const anchor = mouseAnchorPos.current || (isTouching.current ? { x: touchStartPos.current.x, y: touchStartPos.current.y } : null);
-      if (isDragging && anchor) {
-        const dx = currentMousePos.current.x - anchor.x;
-        const dy = currentMousePos.current.y - anchor.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > 70) {
-          slingshotBonusPower.current = Math.min(2.0, slingshotBonusPower.current + 0.1);
-          createExplosion(x, y, '#00ffcc', 3); // Visual feedback for absorption
-        }
-      }
-
       // Boost overdrive
       if (!isOverdriveActiveRef.current) {
         overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + 0.5);
@@ -1399,6 +1486,9 @@ export default function App() {
 
   // Game Loop
   const update = () => {
+    // Hit stop logic
+    if (Date.now() < hitStopTimer.current) return;
+
     const dt = dtRef.current;
 
     // Warp logic should run even if not in PLAYING state (e.g. STAGE_CLEAR)
@@ -1561,71 +1651,74 @@ export default function App() {
       targetPos.current.y += (Math.random() - 0.5) * 15 * dt;
     }
 
-    // --- Player Movement Logic (Distance-based speed with inertia) ---
-    const centerX = playerPos.current.x + PLAYER_WIDTH / 2;
-    const centerY = playerPos.current.y + PLAYER_HEIGHT / 2;
-    const targetX = targetPos.current.x + PLAYER_WIDTH / 2;
-    const targetY = targetPos.current.y + PLAYER_HEIGHT / 2;
+    // Update Slingshot Trails
+    if (Date.now() < slingshotAttackUntil.current) {
+      slingshotTrails.current.push({
+        x: playerPos.current.x + PLAYER_WIDTH / 2,
+        y: playerPos.current.y + PLAYER_HEIGHT / 2,
+        alpha: 1.0
+      });
+    }
+    slingshotTrails.current = slingshotTrails.current
+      .map(t => ({ ...t, alpha: t.alpha - 0.15 }))
+      .filter(t => t.alpha > 0);
 
-    const dx = targetX - centerX;
-    const dy = targetY - centerY;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-
-    // Distance-based speed scaling with "Rubber Band" Physics
-    const deadzone = 1.0;
-    const isDragging = isMouseDown.current || isTouching.current;
-
-    if (distance > deadzone) {
-      // Calculate "Tension" - non-linear power (Hooke's Law variation)
-      const tension = Math.min(distance / 200, 1.5);
-      const springForce = Math.pow(tension, 1.0) * 8.0; // Increased force for snappier follow
-
-      const baseSpeed = PLAYER_SPEED * speedRef.current * (isOverdriveActiveRef.current ? 1.4 : 1.0);
-      
-      // Target velocity with spring-like snap
-      const targetVelX = (dx / distance) * baseSpeed * springForce;
-      const targetVelY = (dy / distance) * baseSpeed * springForce;
-
-      // Organic Acceleration: Much tighter when dragging to reduce "lag"
-      const mass = isDragging ? 0.05 : 0.02; 
-      const accel = (mass + tension * 0.1) * dt;
-      
-      // Apply damping: Significantly reduced during "Snap" phase to maintain momentum
-      const baseDamping = isDragging ? 0.80 : 0.92;
-      const damping = isSnapping.current > 0 ? 0.98 : baseDamping;
-      
-      playerVel.current.x *= Math.pow(damping, dt);
-      playerVel.current.y *= Math.pow(damping, dt);
-
-      playerVel.current.x += (targetVelX - playerVel.current.x) * accel;
-      playerVel.current.y += (targetVelY - playerVel.current.y) * accel;
-
-      if (isSnapping.current > 0) isSnapping.current--;
-
-      // Visual feedback for high tension
-      if (distance > 100 && isDragging) {
-        shake.current = Math.max(shake.current, 0.8);
-        if (Date.now() % 25 === 0) {
-          createExplosion(centerX, centerY, '#ffffff', 1); 
-        }
-      }
-    } else {
-      // High-damping friction when close to center for that 'settling' feel
-      const momentum = Math.pow(0.88, dt); 
-      playerVel.current.x *= momentum;
-      playerVel.current.y *= momentum;
-      
-      if (Math.abs(playerVel.current.x) < 0.1) playerVel.current.x = 0;
-      if (Math.abs(playerVel.current.y) < 0.1) playerVel.current.y = 0;
+    // Update Slingshot Trajectory
+    if (slingshotTrajectory.current) {
+      slingshotTrajectory.current.alpha -= 0.05;
+      if (slingshotTrajectory.current.alpha <= 0) slingshotTrajectory.current = null;
     }
 
-    // Apply velocity to position
+    // --- Player Movement Logic (Simplified) ---
+    
+    // 1. DAMPING & FRICTION (Only for Slingshot Snap)
+    if (isSnapping.current > 0) {
+      playerVel.current.x *= 0.98;
+      playerVel.current.y *= 0.98;
+      isSnapping.current--;
+    } else {
+      // Very high friction for precision mode to feel responsive
+      playerVel.current.x *= 0.85;
+      playerVel.current.y *= 0.85;
+    }
+
+    // 2. TARGET FOLLOWING (Precision Mode)
+    const isDragging = isMouseDown.current || isTouching.current;
+    if (!isSlingshotMode.current) {
+      // Smoothed follow in precision mode to feel more physical and less "teleporty"
+      // This brings player response closer to enemy movement speeds
+      const lerpFactor = 0.25 * dt;
+      playerPos.current.x += (targetPos.current.x - playerPos.current.x) * lerpFactor;
+      playerPos.current.y += (targetPos.current.y - playerPos.current.y) * lerpFactor;
+      playerVel.current = { x: 0, y: 0 };
+    } else if (!isDragging) {
+      // Slingshot snap/momentum
+      const dx = targetPos.current.x - playerPos.current.x;
+      const dy = targetPos.current.y - playerPos.current.y;
+      playerVel.current.x += dx * 0.4 * dt;
+      playerVel.current.y += dy * 0.4 * dt;
+    }
+
+    // 3. APPLY VELOCITY
     playerPos.current.x += playerVel.current.x * dt;
     playerPos.current.y += playerVel.current.y * dt;
 
-    // Constrain to screen
-    playerPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerPos.current.x));
-    playerPos.current.y = Math.max(0, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerPos.current.y));
+    // 4. WALL COLLISION (Simple)
+    if (playerPos.current.x < 0) {
+      playerPos.current.x = 0;
+      playerVel.current.x = 0;
+    } else if (playerPos.current.x > CANVAS_WIDTH - PLAYER_WIDTH) {
+      playerPos.current.x = CANVAS_WIDTH - PLAYER_WIDTH;
+      playerVel.current.x = 0;
+    }
+
+    if (playerPos.current.y < 0) {
+      playerPos.current.y = 0;
+      playerVel.current.y = 0;
+    } else if (playerPos.current.y > CANVAS_HEIGHT - PLAYER_HEIGHT) {
+      playerPos.current.y = CANVAS_HEIGHT - PLAYER_HEIGHT;
+      playerVel.current.y = 0;
+    }
 
     // Update tilt based on horizontal velocity or snap direction
     const pullX = isMouseDown.current || isTouching.current ? (currentMousePos.current.x - (mouseAnchorPos.current?.x || touchStartPos.current.x)) : 0;
@@ -2974,6 +3067,14 @@ export default function App() {
           // Offensive collision: Damage enemy
           const damage = isOverdriveActiveRef.current ? 1000 : 150;
           enemy.health! -= damage;
+          
+          if (isSlingshotAttacking) {
+            hitStopTimer.current = Date.now() + 60; // 60ms hit stop
+            shake.current = Math.max(shake.current, 20);
+            createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ffffff', 40);
+            createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#00ffcc', 30);
+          }
+          
           if (enemy.health! <= 0) {
             enemy.alive = false;
             createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#00ffcc', 40);
@@ -3014,14 +3115,8 @@ export default function App() {
     if (playerHit && Date.now() > invulnerableUntil.current) {
       // COUNTER HIT: If hit while dragging a high-tension slingshot, it's extra dangerous!
       const isDragging = isMouseDown.current || isTouching.current;
-      const anchor = mouseAnchorPos.current || (isTouching.current ? { x: touchStartPos.current.x, y: touchStartPos.current.y } : null);
-      let isHighTension = false;
-      if (isDragging && anchor) {
-        const dx = currentMousePos.current.x - anchor.x;
-        const dy = currentMousePos.current.y - anchor.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > 70) isHighTension = true;
-      }
+      const isHighTension = isDragging && isSlingshotCharged.current;
+      
       // Auto-bomb if overdrive is full
       if (overdriveGauge.current >= MAX_OVERDRIVE && !isOverdriveActiveRef.current) {
         activateOverdrive();
@@ -3043,7 +3138,6 @@ export default function App() {
           isMouseDown.current = false; // Force release
           mouseAnchorPos.current = null;
           isTouching.current = false;
-          slingshotBonusPower.current = 0;
         }
         return;
       }
@@ -3064,7 +3158,6 @@ export default function App() {
         isMouseDown.current = false;
         mouseAnchorPos.current = null;
         isTouching.current = false;
-        slingshotBonusPower.current = 0;
       }
       
       // Spawn player explosion particles
@@ -3733,6 +3826,32 @@ export default function App() {
       ctx.restore();
     });
 
+    // Slingshot Trajectory Rendering
+    if (slingshotTrajectory.current) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(slingshotTrajectory.current.x1, slingshotTrajectory.current.y1);
+      ctx.lineTo(slingshotTrajectory.current.x2, slingshotTrajectory.current.y2);
+      ctx.strokeStyle = `rgba(255, 255, 255, ${slingshotTrajectory.current.alpha * 0.4})`;
+      ctx.lineWidth = 4;
+      ctx.setLineDash([10, 10]);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Slingshot Trails Rendering
+    slingshotTrails.current.forEach(t => {
+      ctx.save();
+      ctx.globalAlpha = t.alpha * 0.5;
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = '#00ffcc';
+      ctx.beginPath();
+      ctx.arc(t.x, t.y, 10 * t.alpha, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+
     // Player
     const isInvulnerable = Date.now() < invulnerableUntil.current;
     const blink = Math.floor(Date.now() / 100) % 2 === 0;
@@ -3749,9 +3868,13 @@ export default function App() {
       if (!isMobile) ctx.shadowBlur = 25;
 
       // Ship Scale & Stretching (Warp/Overdrive/Beat/Rubber Band)
-      const pullDist = isMouseDown.current || isTouching.current ? Math.sqrt((currentMousePos.current.x - (mouseAnchorPos.current?.x || touchStartPos.current.x))**2 + (currentMousePos.current.y - (mouseAnchorPos.current?.y || touchStartPos.current.y))**2) : 0;
+      const anchor = isTouching.current ? touchStartPos.current : mouseAnchorPos.current;
+      const pullDist = (isMouseDown.current || isTouching.current) && anchor ? 
+        Math.sqrt((currentMousePos.current.x - anchor.x)**2 + (currentMousePos.current.y - anchor.y)**2) : 0;
       const pullRatio = Math.min(pullDist / 100, 1);
-      const shipVib = pullRatio > 0.8 ? (Math.random() - 0.5) * 2 : 0;
+      
+      // Vibration only in Slingshot Mode to avoid cluttering precision movement
+      const shipVib = (isSlingshotMode.current && pullRatio > 0.8) ? (Math.random() - 0.5) * 2 : 0;
       ctx.translate(shipVib, shipVib);
 
       const beatPulse = pulseRef.current * 0.15;
@@ -3764,9 +3887,9 @@ export default function App() {
       const stretchY = 1 + warpFactor.current * 1.5 + rubberStretch;
       const stretchX = 1 - warpFactor.current * 0.3 - rubberStretch * 0.3;
       
-      // Tension Visual (Charging Slingshot)
+      // Tension Visual (Charging Slingshot) - Only in Slingshot Mode
       const isCharging = isMouseDown.current || isTouching.current;
-      const tensionVib = isCharging && pullDist > 70 ? (Math.random() - 0.5) * (pullDist / 20) : 0;
+      const tensionVib = (isSlingshotMode.current && isCharging && pullDist > 70) ? (Math.random() - 0.5) * (pullDist / 20) : 0;
       ctx.translate(tensionVib, 0);
 
       // If moving fast horizontally, tilt more towards velocity
@@ -3834,14 +3957,31 @@ export default function App() {
       }
       ctx.lineWidth = 2.5;
       
+      // Slingshot Mode Readiness Glow
+      if (isSlingshotMode.current && (isMouseDown.current || isTouching.current) && pullDist > 5) {
+        ctx.save();
+        const pulse = Math.sin(Date.now() * 0.01) * 0.5 + 0.5;
+        ctx.strokeStyle = `rgba(0, 255, 204, ${0.3 + pulse * 0.4})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, 40 + pulse * 10, 0, Math.PI * 2);
+        ctx.stroke();
+        
+        ctx.setLineDash([5, 10]);
+        ctx.rotate(Date.now() * 0.002);
+        ctx.beginPath();
+        ctx.arc(0, 0, 35, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+      
       // High-End Neon Vector Ship
       drawShipVector(ctx);
 
-      // Charging Tension Glow - Simplified on mobile
-      if (isCharging && pullDist > 15) {
+      // Charging Tension Glow - Only in Slingshot Mode
+      if (isSlingshotMode.current && isCharging && pullDist > 15) {
         ctx.save();
         const tensionRatio = Math.min(pullDist / 150, 1.5);
-        const bonusRatio = slingshotBonusPower.current / 2.0;
         
         ctx.strokeStyle = `rgba(0, 255, 204, ${0.2 + tensionRatio * 0.4})`;
         ctx.lineWidth = 1 + tensionRatio * 2;
@@ -3850,12 +3990,6 @@ export default function App() {
           ctx.shadowColor = '#00ffcc';
         }
         
-        // Bonus power sparks
-        if (bonusRatio > 0.1) {
-          ctx.strokeStyle = `rgba(255, 255, 255, ${bonusRatio})`;
-          ctx.lineWidth = 2;
-        }
-
         ctx.beginPath();
         ctx.arc(0, 0, 15 + tensionRatio * 10, 0, Math.PI * 2);
         ctx.stroke();
@@ -4521,70 +4655,109 @@ export default function App() {
 
     // Draw Mouse/Touch Anchor & Tether
     if (gameState === 'PLAYING') {
-      const anchor = mouseAnchorPos.current || (isTouching.current ? { x: touchStartPos.current.x, y: touchStartPos.current.y } : null);
+      const anchor = isTouching.current ? touchStartPos.current : mouseAnchorPos.current;
       const current = currentMousePos.current;
 
       if (anchor && (isMouseDown.current || isTouching.current)) {
         const dx = current.x - anchor.x;
         const dy = current.y - anchor.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        const maxJoy = 100;
-        const ratio = Math.min(dist / maxJoy, 1);
+        
+        if (dist > 5) {
+          const maxJoy = 100;
+          const ratio = Math.min(dist / maxJoy, 1);
 
-        ctx.save();
-        
-        // 1. Anchor Ring (The '⚪︎') - Pulses and changes color with tension
-        const isAttackRange = dist >= 70;
-        const tension = Math.min(dist / 180, 1.5);
-        const hue = isAttackRange ? 180 + (tension * 120) : 180; // Only change hue in attack range
-        
-        ctx.beginPath();
-        ctx.arc(anchor.x, anchor.y, 25 + tension * 10, 0, Math.PI * 2);
-        ctx.strokeStyle = isAttackRange 
-          ? `hsla(${hue}, 100%, 70%, ${0.4 + tension * 0.4})`
-          : `rgba(0, 255, 204, 0.3)`;
-        ctx.lineWidth = isAttackRange ? 2 + tension * 4 : 1;
-        ctx.stroke();
+          ctx.save();
+          
+          if (isSlingshotMode.current) {
+            const pCenterX = playerPos.current.x + PLAYER_WIDTH / 2;
+            const pCenterY = playerPos.current.y + PLAYER_HEIGHT / 2;
+            const sCenterX = playerStartPos.current.x + PLAYER_WIDTH / 2;
+            const sCenterY = playerStartPos.current.y + PLAYER_HEIGHT / 2;
+            
+            // 0. Threshold Barrier (Centered on Ship's Start Position)
+            ctx.beginPath();
+            ctx.arc(sCenterX, sCenterY, SLINGSHOT_THRESHOLD, 0, Math.PI * 2);
+            ctx.strokeStyle = isSlingshotCharged.current ? `rgba(0, 255, 204, 0.2)` : `rgba(255, 255, 255, 0.05)`;
+            ctx.setLineDash([10, 20]);
+            ctx.stroke();
+            ctx.setLineDash([]);
 
-        // 2. Tether Line (The '紐')
-        ctx.beginPath();
-        const midX = (anchor.x + current.x) / 2;
-        const midY = (anchor.y + current.y) / 2;
-        
-        // Line vibration ONLY at high tension
-        const jitter = (isAttackRange && tension > 0.8) ? (Math.sin(Date.now() * 0.05) * (tension - 0.8) * 15) : 0;
-        
-        ctx.moveTo(anchor.x, anchor.y);
-        ctx.quadraticCurveTo(midX + jitter, midY + jitter, current.x, current.y);
-        
-        ctx.strokeStyle = isAttackRange
-          ? `hsla(${hue}, 100%, 60%, ${0.5 + tension * 0.5})`
-          : `rgba(0, 255, 204, 0.4)`;
-        ctx.lineWidth = isAttackRange ? 2 + tension * 5 : 1.5;
-        
-        if (!isAttackRange) {
-          ctx.setLineDash([5, 5]); // Dashed line for adjustment mode
-        }
-        ctx.stroke();
-        ctx.setLineDash([]);
+            // 1. Tension Visuals
+            const tension = dist / SLINGSHOT_THRESHOLD;
+            const clampedTension = Math.min(tension, 2.5);
+            const isAttackRange = isSlingshotCharged.current && tension > 1.0;
+            
+            let ringColor = `rgba(0, 255, 204, 0.3)`;
+            let lineWidth = 2;
+            let hue = 180;
 
-        // 3. Inner Core Glow
-        if (isAttackRange) {
-          ctx.beginPath();
-          ctx.arc(anchor.x, anchor.y, 5 + tension * 5, 0, Math.PI * 2);
-          ctx.fillStyle = `hsla(${hue}, 100%, 80%, 0.8)`;
-          ctx.fill();
-        }
+            if (isAttackRange) {
+              hue = 300 + (clampedTension - 1.0) * 60;
+              ringColor = `hsla(${hue}, 100%, 60%, ${0.7 + (clampedTension - 1.0) * 0.3})`;
+              lineWidth = 6 + (clampedTension - 1.0) * 15;
+            } else if (tension > 0.6) {
+              const warningRatio = (tension - 0.6) / 0.4;
+              const r = Math.floor(0 + 255 * warningRatio);
+              const g = Math.floor(255);
+              const b = Math.floor(204 - 204 * warningRatio);
+              ringColor = `rgba(${r}, ${g}, ${b}, ${0.3 + warningRatio * 0.4})`;
+              lineWidth = 2 + warningRatio * 4;
+            }
 
-        // 4. High Tension Sparks
-        if (tension > 1.0 && Date.now() % 3 === 0) {
-          createExplosion(current.x, current.y, '#ffffff', 1);
-          if (Math.random() > 0.5) {
-            createExplosion(current.x, current.y, `hsla(${hue}, 100%, 70%, 1)`, 1);
+            // 2. Tether Line (From Ship to Relative Mouse Offset)
+            const handleX = pCenterX + dx;
+            const handleY = pCenterY + dy;
+            
+            ctx.beginPath();
+            const midX = (pCenterX + handleX) / 2;
+            const midY = (pCenterY + handleY) / 2;
+            const jitterIntensity = isAttackRange ? Math.max(0, (clampedTension - 1.0) * 40) : (tension > 0.8 ? (tension - 0.8) * 5 : 0);
+            const jitter = Math.sin(Date.now() * 0.08) * jitterIntensity;
+            
+            ctx.moveTo(pCenterX, pCenterY);
+            ctx.quadraticCurveTo(midX + jitter, midY + jitter, handleX, handleY);
+            ctx.strokeStyle = ringColor;
+            ctx.lineWidth = isAttackRange ? 4 + (clampedTension - 1.0) * 20 : 2.5;
+            ctx.stroke();
+
+            // 3. Anchor Core (At Ship Center)
+            ctx.beginPath();
+            ctx.arc(pCenterX, pCenterY, 8, 0, Math.PI * 2);
+            ctx.fillStyle = isAttackRange ? `hsla(${hue}, 100%, 70%, 0.9)` : `rgba(0, 255, 204, 0.8)`;
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // 4. Mouse Handle (The "Pull Point" - Relative)
+            ctx.beginPath();
+            ctx.arc(handleX, handleY, 12 + clampedTension * 5, 0, Math.PI * 2);
+            ctx.strokeStyle = ringColor;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // 5. Inner Core Glow
+            if (isAttackRange) {
+              ctx.beginPath();
+              ctx.arc(pCenterX, pCenterY, 5 + clampedTension * 5, 0, Math.PI * 2);
+              ctx.fillStyle = `hsla(${hue}, 100%, 80%, 0.8)`;
+              ctx.fill();
+            }
+
+            // 6. High Tension Sparks
+            if (clampedTension > 1.0 && Date.now() % 3 === 0) {
+              createExplosion(handleX, handleY, '#ffffff', 1);
+              if (Math.random() > 0.5) {
+                createExplosion(handleX, handleY, `hsla(${hue}, 100%, 70%, 1)`, 1);
+              }
+            }
+          } else {
+            // PRECISION MODE: No visual line
           }
+          
+          ctx.restore();
         }
-        
-        ctx.restore();
       }
     }
 
