@@ -23,6 +23,7 @@ import { buildWaveEnemies, createEnemy } from './game/enemies';
 import { bindInputListeners } from './hooks/useInput';
 import { LEVEL_UP_OPTIONS, RELIC_LABELS, RELIC_OPTIONS, UpgradeOption, pickRandomOptions } from './game/upgrades';
 import { getStageFromWave, getStageLabelFromWave, getSurvivalDurationFromStage } from './game/stage';
+import { XP_PER_SCRAP, applyXpGain } from './game/progression';
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -390,9 +391,21 @@ export default function App() {
   const handleScrapCollection = (s: Scrap) => {
     setScrapCount(prev => prev + 1);
     setScore(prev => prev + 10);
-    const xpGain = 10; // Balanced XP gain
-    xpRef.current += xpGain;
+    const progress = applyXpGain(
+      {
+        level: levelRef.current,
+        xp: xpRef.current,
+        xpToNextLevel: xpToNextLevelRef.current,
+      },
+      XP_PER_SCRAP
+    );
+
+    levelRef.current = progress.next.level;
+    xpRef.current = progress.next.xp;
+    xpToNextLevelRef.current = progress.next.xpToNextLevel;
+    setLevel(levelRef.current);
     setXp(xpRef.current);
+    setXpToNextLevel(xpToNextLevelRef.current);
 
     // Give Overdrive fuel on scrap collection
     if (!isOverdriveActiveRef.current) {
@@ -400,15 +413,7 @@ export default function App() {
       setOverdrive(overdriveGauge.current);
     }
 
-    if (xpRef.current >= xpToNextLevelRef.current) {
-      xpRef.current -= xpToNextLevelRef.current;
-      levelRef.current += 1;
-      xpToNextLevelRef.current = Math.floor(xpToNextLevelRef.current * 1.5);
-
-      setLevel(levelRef.current);
-      setXp(xpRef.current);
-      setXpToNextLevel(xpToNextLevelRef.current);
-
+    if (progress.didLevelUp) {
       triggerLevelUp();
     }
 
