@@ -163,6 +163,10 @@ export default function App() {
   const isHackedRef = useRef(false);
   const stageStartTime = useRef(0);
   const ambushTimer = useRef(0);
+  const lastGrazeAt = useRef(0);
+  const lastTrailSpawnAt = useRef(0);
+  const lastSparkAt = useRef(0);
+  const lastTractorBeamDamageAt = useRef(0);
   const [survivalTime, setSurvivalTime] = useState(30);
   const survivalTimerRef = useRef(30);
   const blocks = useRef<Obstacle[]>([]);
@@ -1259,7 +1263,9 @@ export default function App() {
   }, [gameState, showUpgrade]);
 
     const handleGraze = (x: number, y: number) => {
-      if (Date.now() % 5 !== 0) return; // Throttling
+      const now = Date.now();
+      if (now - lastGrazeAt.current < 50) return; // Throttle independent of frame rate
+      lastGrazeAt.current = now;
       audio.playGraze();
       grazeCount.current++;
       setScore(s => s + 10);
@@ -1619,7 +1625,9 @@ export default function App() {
     const isMoving = Math.abs(targetPos.current.x - playerPos.current.x) > 0.1 || Math.abs(targetPos.current.y - playerPos.current.y) > 0.1;
 
     // Add trail
-    if (isMoving && Date.now() % 3 === 0 && trails.current.length < MAX_TRAILS) {
+    const now = Date.now();
+    if (isMoving && now - lastTrailSpawnAt.current > 16 && trails.current.length < MAX_TRAILS) {
+      lastTrailSpawnAt.current = now;
       trails.current.push({
         x: playerPos.current.x + PLAYER_WIDTH / 2,
         y: playerPos.current.y + PLAYER_HEIGHT / 2,
@@ -2240,7 +2248,7 @@ export default function App() {
       if (enemy.isBoss) {
         // Boss Movement & Phase Logic
         if (enemy.y < enemy.originY) {
-          enemy.y += 1; // Entry
+          enemy.y += 1 * dt; // Entry (frame-rate independent)
         } else {
           // Horizontal movement
           let moveSpeed = enemy.bossType === BossType.LASER ? 0.5 : 1.5;
@@ -2257,7 +2265,7 @@ export default function App() {
 
           // Boss specific behaviors
           if (enemy.bossType === BossType.TRACTOR) {
-            enemy.tractorBeamTimer += 16 * timeScale.current;
+            enemy.tractorBeamTimer += 16 * timeScale.current * dt;
             if (!enemy.isTractorBeaming && enemy.tractorBeamTimer > 3000) {
               enemy.isTractorBeaming = true;
               enemy.tractorBeamTimer = 0;
@@ -2275,7 +2283,10 @@ export default function App() {
               const py = playerPos.current.y + PLAYER_HEIGHT / 2;
               if (Math.abs(px - enemy.tractorBeamX!) < beamWidth / 2 && py > enemy.y) {
                 playerPos.current.x += (enemy.tractorBeamX! - px) * 0.05;
-                if (currentTime % 500 < 20) handlePlayerHit();
+                if (currentTime - lastTractorBeamDamageAt.current > 500) {
+                  lastTractorBeamDamageAt.current = currentTime;
+                  handlePlayerHit();
+                }
                 isHackedRef.current = true;
                 glitch.current = 15;
               }
@@ -2355,7 +2366,7 @@ export default function App() {
             }
           } else if (enemy.bossType === BossType.LASER) {
             // Rotating Laser Beams
-            enemy.tractorBeamTimer += 16 * timeScale.current; // Using this as rotation angle
+            enemy.tractorBeamTimer += 16 * timeScale.current * dt; // Using this as rotation angle
             const angle = (enemy.tractorBeamTimer / 1000) * Math.PI;
             const laserCount = enemy.phase === 3 ? 4 : 2;
 
@@ -4598,7 +4609,9 @@ export default function App() {
             }
 
             // 6. High Tension Sparks
-            if (clampedTension > 1.0 && Date.now() % 3 === 0) {
+            const sparkNow = Date.now();
+            if (clampedTension > 1.0 && sparkNow - lastSparkAt.current > 33) {
+              lastSparkAt.current = sparkNow;
               createExplosion(handleX, handleY, '#ffffff', 1);
               if (Math.random() > 0.5) {
                 createExplosion(handleX, handleY, `hsla(${hue}, 100%, 70%, 1)`, 1);
@@ -4926,7 +4939,7 @@ export default function App() {
               </div>
               <div className="w-24 h-1 bg-white/10 rounded-full overflow-hidden">
                 <motion.div
-                  animate={{ width: `${(survivalTime / 30) * 100}%` }}
+                  animate={{ width: `${(survivalTime / 45) * 100}%` }}
                   className="h-full bg-[#00ffcc]"
                 />
               </div>
