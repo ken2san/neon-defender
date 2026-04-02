@@ -19,6 +19,7 @@ import {
   BossType, Obstacle, DamageNumber, TailSegment, Drone,
 } from './types';
 import NeonShip from './components/NeonShip';
+import GameHud from './components/GameHud';
 import { buildWaveEnemies, createEnemy } from './game/enemies';
 import { bindInputListeners } from './hooks/useInput';
 import { LEVEL_UP_OPTIONS, RELIC_LABELS, RELIC_OPTIONS, UpgradeOption, pickRandomOptions } from './game/upgrades';
@@ -4834,121 +4835,19 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#020205] text-white flex flex-col items-center justify-center font-mono overflow-hidden">
-      {/* Consolidated Compact HUD (Genius Designer Style) */}
-      <div className="w-full max-w-150 px-4 mb-3 flex flex-col gap-2 z-100 relative">
-        {/* Level & XP Bar (Top Full Width) */}
-        <div className="w-full flex flex-col gap-1 mb-1">
-          <div className="flex justify-between items-end px-1">
-            <div className="flex items-center gap-2">
-              <span className="text-[8px] text-gray-500 font-black uppercase tracking-[0.2em]">Pilot Level</span>
-              <span className="text-sm font-black text-[#00ffcc] drop-shadow-[0_0_8px_rgba(0,255,204,0.5)]">{level}</span>
-            </div>
-            <span className="text-[7px] text-gray-600 font-bold uppercase tracking-widest">{Math.floor(xp)} / {xpToNextLevel} XP</span>
-          </div>
-          <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden border border-white/5 p-px">
-            <motion.div
-              animate={{ width: `${(xp / xpToNextLevel) * 100}%` }}
-              className="h-full bg-[#00ffcc] shadow-[0_0_10px_rgba(0,255,204,0.8)] rounded-full"
-            />
-          </div>
-        </div>
-
-        {/* HUD Decorative Brackets */}
-        <div className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-[#00ffcc]/30 rounded-tl-md" />
-        <div className="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-[#00ffcc]/30 rounded-tr-md" />
-        <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-[#00ffcc]/30 rounded-bl-md" />
-        <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-[#00ffcc]/30 rounded-br-md" />
-
-        <div className="flex justify-between items-end">
-          {/* Left: Sector & Score */}
-          <div className="flex flex-col">
-            <div className="flex items-center gap-2 mb-1">
-              <div className="w-1 h-3 bg-[#00ffcc] rounded-full animate-pulse" />
-              <span className="text-[10px] font-black text-[#00ffcc] uppercase tracking-[0.4em]">{sectorName}</span>
-            </div>
-            <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-black text-white tracking-tighter leading-none drop-shadow-[0_0_15px_rgba(255,255,255,0.4)]">
-                {score.toLocaleString().padStart(8, '0')}
-              </span>
-              <span className="text-[8px] text-gray-600 font-bold uppercase tracking-widest">PTS</span>
-            </div>
-          </div>
-
-          {/* Center: Dual Fighter Status (Floating) */}
-          <AnimatePresence>
-            {wingmanRef.current && (
-              <motion.div
-                initial={{ scale: 0, opacity: 0, y: 10 }}
-                animate={{ scale: 1, opacity: 1, y: 0 }}
-                exit={{ scale: 0, opacity: 0, y: 10 }}
-                className="absolute left-1/2 -translate-x-1/2 -top-6 flex items-center gap-2 px-3 py-1 bg-[#00ffcc]/10 border border-[#00ffcc]/40 rounded-full shadow-[0_0_20px_rgba(0,255,204,0.2)]"
-              >
-                <Zap className="w-3 h-3 text-[#00ffcc] fill-[#00ffcc] animate-pulse" />
-                <span className="text-[9px] font-black text-[#00ffcc] uppercase tracking-widest">Dual Mode Active</span>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Right: Integrity & Overdrive */}
-          <div className="flex flex-col items-end gap-2">
-            {/* Integrity Bars */}
-            <div className="flex items-center gap-3">
-              <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Integrity</span>
-              <div className="flex gap-1">
-                {[...Array(10)].map((_, i) => (
-                  <motion.div
-                    key={i}
-                    animate={i < (integrity / 10) ? { opacity: [0.7, 1, 0.7] } : {}}
-                    transition={{ duration: 2, repeat: Infinity, delay: i * 0.1 }}
-                    className={`w-2 h-1.5 rounded-sm transition-all duration-500 ${
-                      i < (integrity / 10)
-                        ? 'bg-[#00ffcc] shadow-[0_0_10px_rgba(0,255,204,0.8)]'
-                        : 'bg-white/5 border border-white/10'
-                    }`}
-                  />
-                ))}
-              </div>
-            </div>
-
-            {/* Overdrive Gauge (Interactive on Mobile) */}
-            <div className="flex flex-col items-end gap-2">
-              <div className="flex items-center gap-3">
-                <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Overdrive</span>
-                <div className="w-36 h-3 bg-black/40 rounded-full overflow-hidden border border-white/10 p-px relative transition-all">
-                  <motion.div
-                    animate={overdrive >= MAX_OVERDRIVE && !isOverdriveActive
-                      ? {
-                          width: '100%',
-                          backgroundColor: ['#ff3366', '#ff336633', '#ff3366'],
-                        }
-                      : {
-                          width: `${(overdrive / MAX_OVERDRIVE) * 100}%`,
-                          backgroundColor: isOverdriveActive ? '#ff3366' : '#00ffcc'
-                        }
-                    }
-                    transition={overdrive >= MAX_OVERDRIVE && !isOverdriveActive
-                      ? { duration: 0.5, repeat: Infinity }
-                      : { duration: 0.3 }
-                    }
-                    className="h-full rounded-full shadow-[0_0_20px_rgba(255,51,102,0.6)]"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Progress Bar (Survival Timer) */}
-        <div className="w-full h-0.75 bg-white/5 relative overflow-hidden rounded-full mt-1">
-          <motion.div
-            animate={{ width: `${(1 - survivalTime / 30) * 100}%` }}
-            className="h-full bg-linear-to-r from-[#ff3366] via-[#ffcc00] to-[#ff3366] shadow-[0_0_15px_rgba(255,51,102,0.6)]"
-          />
-          <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-[6px] text-white/40 font-bold uppercase tracking-[0.5em]">Sector_Progress</span>
-          </div>
-        </div>
-      </div>
+      <GameHud
+        level={level}
+        xp={xp}
+        xpToNextLevel={xpToNextLevel}
+        sectorName={sectorName}
+        score={score}
+        wingmanActive={wingmanRef.current}
+        integrity={integrity}
+        overdrive={overdrive}
+        maxOverdrive={MAX_OVERDRIVE}
+        isOverdriveActive={isOverdriveActive}
+        survivalTime={survivalTime}
+      />
 
       {/* Game Canvas Container with Ambient Glow and Scanlines */}
       <div className="relative border-4 md:border-8 border-[#1a1a2e] rounded-xl shadow-[0_0_80px_rgba(0,255,204,0.15)] overflow-hidden max-w-[95vw] max-h-[70vh] aspect-3/4 group">
