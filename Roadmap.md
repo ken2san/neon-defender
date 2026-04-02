@@ -126,9 +126,18 @@ Raise the quality bar on performance, mobile UX, and audio.
 
 Use one row per 60s run in the fixed scenario.
 
-| Run Date | Build/Commit | Scenario | FPS p50 | FPS p95 | Frame ms p50 | Frame ms p95 | Enemies | Bullets | Enemy Bullets | Particles | Notes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| YYYY-MM-DD | <commit> | Stage X / Wave Y / input pattern Z | - | - | - | - | - | - | - | - | baseline |
+Execution steps:
+
+1. Launch the game with the current mainline build.
+2. Run the fixed scenario for 60 seconds with the same input pattern.
+3. Read performance overlay values at the end of the run.
+4. Record one row in the table below.
+5. Repeat at least 3 runs and use median values as the baseline reference.
+
+| Run Date   | Build/Commit | Scenario                           | FPS p50 | FPS p95 | Frame ms p50 | Frame ms p95 | Enemies | Bullets | Enemy Bullets | Particles | Notes    |
+| ---------- | ------------ | ---------------------------------- | ------- | ------- | ------------ | ------------ | ------- | ------- | ------------- | --------- | -------- |
+| YYYY-MM-DD | <commit>     | Stage X / Wave Y / input pattern Z | -       | -       | -            | -            | -       | -       | -             | -         | baseline |
+
 - Next (execute in order)
   - P4-2: Mobile touch control refinement
   - P4-3: Sound design review (BGM/SFX balance)
