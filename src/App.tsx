@@ -1193,6 +1193,12 @@ export default function App() {
     const handleMouseMove = (e: MouseEvent) => {
       if (gameState !== 'PLAYING' || showUpgrade) return;
 
+      // Web/trackpad safety: if mouseup was swallowed by gesture handling,
+      // force-release stale drag state when no button is currently pressed.
+      if (isMouseDown.current && e.buttons === 0 && !isTouching.current) {
+        handleMouseUp();
+      }
+
       const rect = canvasRef.current?.getBoundingClientRect();
       if (rect) {
         const x = ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
