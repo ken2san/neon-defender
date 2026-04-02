@@ -119,13 +119,15 @@ Raise the quality bar on performance, mobile UX, and audio.
   - Star movement and particle movement audit
     - Star warp/scroll movement now multiplies by `dtRef.current`
     - Particle movement confirmed dt-consistent in all paths
-- In Progress
 - Completed
   - P4-1: Run 60s baseline captures per fixed scenario and compare perf overlay values
   - P4-2: Mobile touch control refinement
     - Tuned touch double-tap window to reduce accidental slingshot activation
     - Reduced touch slingshot deadzone and adjusted resistance for more responsive drag feel
     - Smoothed touch input velocity sampling to stabilize flick detection
+    - Fixed mobile-only slingshot bounce-back regression after touch smoothing changes
+    - Restored web slingshot coast behavior while keeping mobile-only tuning scoped to touch flow
+    - Fine-tuned mobile-only post-release slingshot speed based on real-device feedback
   - P4-3: Sound design review (BGM/SFX balance)
     - Rebalanced master level and reduced peak-heavy SFX levels (slingshot, overdrive, player hit, explosion)
     - Slightly reduced kick/sub dominance in BGM to improve gameplay cue clarity
@@ -162,7 +164,7 @@ Execution steps:
 | 2026-04-02 | de21773      | Median (run-1..run-3)                | 125.0   | 125.0   | 8.00         | 9.00         | 5       | 3       | 15            | 15        | baseline reference |
 
 - Next (execute in order)
-  - Compare current build against baseline and accept/reject each polish unit under Phase 4 Exit Criteria
+  - Phase 4 exit criteria confirmed. Move to Phase 5 release checklist and deploy latest tuned build.
 
 ### Phase 4 Exit Criteria
 
@@ -223,4 +225,4 @@ Ship a stable, deployable build to Firebase Hosting.
 
 ## Current Status
 
-Active phase: **Phase 4 (Polish)**
+Active phase: **Phase 5 (Release)**
