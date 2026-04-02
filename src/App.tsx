@@ -1575,7 +1575,7 @@ export default function App() {
       isSnapping.current--;
       // When snapping ends and no finger is down, sync targetPos to current position
       // so the precision lerp doesn't pull the ship back toward the fire-time target.
-      if (isSnapping.current === 0 && !isDragging) {
+      if (isMobile && isSnapping.current === 0 && !isDragging) {
         targetPos.current = { x: playerPos.current.x, y: playerPos.current.y };
       }
     } else {
