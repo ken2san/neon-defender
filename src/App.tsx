@@ -2754,7 +2754,7 @@ export default function App() {
 
     // Formation dive
     const currentDiveTime = Date.now();
-    const diveInterval = Math.max(1200, 3000 - waveRef.current * 200);
+    const diveInterval = Math.max(1500, 3200 - waveRef.current * 150);
     if (currentDiveTime - lastDiveTime.current > diveInterval) {
       const aliveEnemies = enemies.current.filter(e => e.alive && e.state === 'IN_FORMATION');
       if (aliveEnemies.length > 0) {
@@ -2935,7 +2935,7 @@ export default function App() {
 
               // Overdrive gauge increase
               if (!isOverdriveActiveRef.current) {
-                overdriveGauge.current = Math.min(100, overdriveGauge.current + 20);
+                overdriveGauge.current = Math.min(100, overdriveGauge.current + 12);
                 setOverdrive(overdriveGauge.current);
               }
 
@@ -3002,7 +3002,8 @@ export default function App() {
 
           // Overdrive gauge increase
           if (!isOverdriveActiveRef.current) {
-            const gaugeGain = (enemy.isDiving ? 3 : 1) * (1 + comboRef.current * 0.1);
+            const stageGainScale = Math.min(1.25, 1 + waveRef.current * 0.02);
+            const gaugeGain = (enemy.isDiving ? 2.2 : 0.9) * stageGainScale;
             overdriveGauge.current = Math.min(100, overdriveGauge.current + gaugeGain);
             setOverdrive(overdriveGauge.current);
           }
@@ -3244,7 +3245,8 @@ export default function App() {
       const maxEnemies = isAsteroidBelt ? 6 : 8;
       if (enemies.current.filter(e => e.alive).length < maxEnemies && !isWarping.current) {
         const x = 40 + Math.random() * (CANVAS_WIDTH - 80);
-        const isElite = Math.random() < 0.15 + (waveRef.current * 0.02);
+        const eliteChance = Math.min(0.3, 0.12 + (waveRef.current * 0.015));
+        const isElite = Math.random() < eliteChance;
         const e: Enemy = {
           ...createEnemy(x, -50, isElite ? 3 : 0),
           width: isElite ? 50 : 35, height: isElite ? 50 : 35,
@@ -3262,7 +3264,10 @@ export default function App() {
     // Ambush System (VS Style constant action)
     if (gameState === 'PLAYING' && !isWarping.current && !isTimeBasedStage) {
       ambushTimer.current += 16 * timeScale.current * dt;
-      if (ambushTimer.current > 8000) { // Every 8 seconds
+      const aliveCount = enemies.current.filter(e => e.alive).length;
+      const isBossWave = enemies.current.some(e => e.alive && e.isBoss);
+      const ambushInterval = Math.max(9000, 12000 - waveRef.current * 250);
+      if (ambushTimer.current > ambushInterval && aliveCount <= 14 && !isBossWave) {
         ambushTimer.current = 0;
         const side = ambushSide.current === 'left' ? -50 : CANVAS_WIDTH + 50;
         const diveType = Math.random() > 0.5 ? 'sine' : 'normal';
