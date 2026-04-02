@@ -101,4 +101,4 @@ Ship a stable, deployable build to Firebase Hosting.
 
 ## Current Status
 
-Active phase: **Phase 3 (Architecture)**
+Active phase: **Phase 4 (Polish)**
