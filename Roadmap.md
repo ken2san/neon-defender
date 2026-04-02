@@ -38,19 +38,19 @@ Audit the current game for feel, balance, and scope — decide what stays, what 
 ### Design Review Focus (Now)
 
 - Difficulty curve normalization:
-	- Reduce wave-to-wave spike variance (especially elite + ambush overlap windows)
-	- Re-check boss HP/time-to-kill against current weapon growth
+  - Reduce wave-to-wave spike variance (especially elite + ambush overlap windows)
+  - Re-check boss HP/time-to-kill against current weapon growth
 - Economy pacing:
-	- Normalize scrap -> XP -> level pacing to prevent early snowball
-	- Rebalance Overdrive gain sources (kill, scrap, boss kill) for consistent cadence
+  - Normalize scrap -> XP -> level pacing to prevent early snowball
+  - Rebalance Overdrive gain sources (kill, scrap, boss kill) for consistent cadence
 - Defensive fairness:
-	- Validate integrity loss patterns against bullet density and dive burst timing
-	- Keep recovery windows readable on both desktop and mobile
+  - Validate integrity loss patterns against bullet density and dive burst timing
+  - Keep recovery windows readable on both desktop and mobile
 - Relic balance:
-	- Mark low-impact relics vs high-impact relics and flatten outliers
-	- Ensure selection frequency aligns with stage pacing
+  - Mark low-impact relics vs high-impact relics and flatten outliers
+  - Ensure selection frequency aligns with stage pacing
 - Time-scale consistency:
-	- Audit stacked slow-motion sources (Chrono, slingshot feedback, overdrive) for control feel stability
+  - Audit stacked slow-motion sources (Chrono, slingshot feedback, overdrive) for control feel stability
 
 ---
 
@@ -101,4 +101,4 @@ Ship a stable, deployable build to Firebase Hosting.
 
 ## Current Status
 
-Active phase: **Phase 2 (Game Design Review)**
+Active phase: **Phase 3 (Architecture)**
