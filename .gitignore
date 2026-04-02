@@ -6,3 +6,32 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Node
+node_modules/
+dist/
+build/
+coverage/
+*.log
+.DS_Store
+
+# Python virtualenv
+.venv/
+
+# Env files (except example)
+.env
+.env.*
+!.env.example
+
+# VSCode
+.vscode/
+
+# Firebase local config
+.firebase/
+.firebaserc
+
+# OS/Editor junk
+Thumbs.db
+ehthumbs.db
+*.swp
+*.swo
