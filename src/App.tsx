@@ -27,6 +27,14 @@ import { LEVEL_UP_OPTIONS, RELIC_LABELS, RELIC_OPTIONS, UpgradeOption, pickRando
 import { getStageFromWave, getStageLabelFromWave, getSurvivalDurationFromStage } from './game/stage';
 import { XP_PER_SCRAP, applyXpGain } from './game/progression';
 
+const getPercentile = (values: number[], percentile: number): number => {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const rank = Math.ceil((percentile / 100) * sorted.length) - 1;
+  const index = Math.min(sorted.length - 1, Math.max(0, rank));
+  return sorted[index];
+};
+
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [gameState, setGameState] = useState<GameState>('LOADING');
@@ -110,6 +118,16 @@ export default function App() {
   const [bossHealth, setBossHealth] = useState<{current: number, max: number} | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [hasSaveData, setHasSaveData] = useState(false);
+  const [perfStats, setPerfStats] = useState({
+    fpsP50: 0,
+    fpsP95: 0,
+    frameMsP50: 0,
+    frameMsP95: 0,
+    enemies: 0,
+    bullets: 0,
+    enemyBullets: 0,
+    particles: 0,
+  });
 
   // Touch & Mouse Movement Refs
   const touchStartPos = useRef({ x: 0, y: 0 });
@@ -167,6 +185,9 @@ export default function App() {
   const lastTrailSpawnAt = useRef(0);
   const lastSparkAt = useRef(0);
   const lastTractorBeamDamageAt = useRef(0);
+  const frameTimeSamplesMs = useRef<number[]>([]);
+  const fpsSamples = useRef<number[]>([]);
+  const lastPerfUiUpdateAt = useRef(0);
   const [survivalTime, setSurvivalTime] = useState(30);
   const survivalTimerRef = useRef(30);
   const blocks = useRef<Obstacle[]>([]);
@@ -4813,8 +4834,29 @@ export default function App() {
     const now = Date.now();
     const elapsed = now - lastTimeRef.current;
     lastTimeRef.current = now;
+    const boundedElapsed = Math.max(1, Math.min(1000, elapsed));
     // Normalize to 60fps (16.67ms per frame)
-    dtRef.current = Math.min(2.0, elapsed / (1000 / 60));
+    dtRef.current = Math.min(2.0, boundedElapsed / (1000 / 60));
+
+    frameTimeSamplesMs.current.push(boundedElapsed);
+    fpsSamples.current.push(1000 / boundedElapsed);
+    if (frameTimeSamplesMs.current.length > 240) frameTimeSamplesMs.current.shift();
+    if (fpsSamples.current.length > 240) fpsSamples.current.shift();
+
+    if (now - lastPerfUiUpdateAt.current >= 500) {
+      lastPerfUiUpdateAt.current = now;
+      const aliveEnemies = enemies.current.reduce((count, enemy) => count + (enemy.alive ? 1 : 0), 0);
+      setPerfStats({
+        fpsP50: getPercentile(fpsSamples.current, 50),
+        fpsP95: getPercentile(fpsSamples.current, 95),
+        frameMsP50: getPercentile(frameTimeSamplesMs.current, 50),
+        frameMsP95: getPercentile(frameTimeSamplesMs.current, 95),
+        enemies: aliveEnemies,
+        bullets: bullets.current.length,
+        enemyBullets: enemyBullets.current.length,
+        particles: particles.current.length,
+      });
+    }
 
     if (ctx) {
       if (Date.now() < hitStopTimer.current) {
@@ -4923,6 +4965,15 @@ export default function App() {
             )
           ))}
         </div>
+
+        {gameState === 'PLAYING' && (
+          <div className="absolute bottom-4 right-4 pointer-events-none bg-black/65 border border-[#00ffcc]/30 rounded px-2 py-1.5 text-[9px] leading-tight text-[#bfffee] font-mono z-30">
+            <div className="text-[8px] text-[#00ffcc] uppercase tracking-widest mb-1">Perf_Baseline</div>
+            <div>FPS p50 {perfStats.fpsP50.toFixed(1)} | p95 {perfStats.fpsP95.toFixed(1)}</div>
+            <div>Frame p50 {perfStats.frameMsP50.toFixed(2)}ms | p95 {perfStats.frameMsP95.toFixed(2)}ms</div>
+            <div>Obj E:{perfStats.enemies} PB:{perfStats.bullets} EB:{perfStats.enemyBullets} P:{perfStats.particles}</div>
+          </div>
+        )}
 
         {/* Survival Timer (Stage 2) */}
         <AnimatePresence>

@@ -83,6 +83,36 @@ Raise the quality bar on performance, mobile UX, and audio.
 - Sound design review (BGM, SFX balance)
 - Visual effects tuning (particles, trails)
 
+### Execution Plan (Now)
+
+1. Measurement baseline first (mandatory)
+   - Fix a reproducible capture window: same stage segment, 60s run, same input pattern
+   - Record FPS and frame time with p50 and p95
+   - Record object counts (enemies, bullets, particles) at the same time
+2. Targeted optimization pass
+   - Address one hotspot group at a time (timers, particle bursts, collision-heavy windows)
+   - Avoid batching unrelated changes in a single pass
+3. Re-measure and compare
+   - Compare only against the fixed baseline scenario
+   - Keep changes only when metrics improve without damaging gameplay readability
+4. Regression gate
+   - Run lint and tests after each logical optimization unit
+   - Reject changes that improve metrics but worsen control feel or difficulty fairness
+
+### Phase 4 Checkpoints
+
+- Completed
+  - Initial frame-rate dependency reduction in `src/App.tsx`
+    - Replaced modulo-based throttles with timestamp cooldown checks
+    - Converted selected fixed-step timers to dt-scaled updates
+    - Corrected Stage 2 survival mini-bar denominator to 45s
+  - Added lightweight in-game performance overlay in `src/App.tsx`
+    - Displays FPS p50/p95, frame time p50/p95, and live object counts
+    - Updates at 500ms intervals with bounded sample windows to keep overhead low
+- Next
+  - Run 60s baseline captures per fixed scenario and store benchmark snapshots
+  - Continue hotspot cleanup using the baseline -> fix -> re-measure loop
+
 ---
 
 ## Phase 5 — Release
