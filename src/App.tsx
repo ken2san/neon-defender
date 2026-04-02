@@ -2532,7 +2532,7 @@ export default function App() {
             enemy.y += currentEnemyDiveSpeed * enemy.speedScale * dt;
           }
         } else {
-          enemy.y += currentEnemyDiveSpeed * enemy.speedScale;
+          enemy.y += currentEnemyDiveSpeed * enemy.speedScale * dt;
 
           if (enemy.diveType === 'zigzag') {
             enemy.x += (enemy.diveX + Math.sin(enemy.diveTime / 10) * 4 * enemy.amplitudeScale) * dt;
@@ -2540,7 +2540,7 @@ export default function App() {
             enemy.x += (enemy.diveX + Math.sin(enemy.diveTime / 40) * 6 * enemy.amplitudeScale) * dt;
           } else if (enemy.diveType === 'sine') {
             enemy.x += (enemy.diveX + Math.sin(enemy.diveTime / 15) * 8 * enemy.amplitudeScale) * dt;
-            enemy.y += currentEnemyDiveSpeed * 0.8 * enemy.speedScale;
+            enemy.y += currentEnemyDiveSpeed * 0.8 * enemy.speedScale * dt;
           } else if (enemy.diveType === 'spread') {
             enemy.x += enemy.diveX * dt;
           } else {
@@ -3135,7 +3135,7 @@ export default function App() {
 
     // Ambush System (VS Style constant action)
     if (gameState === 'PLAYING' && !isWarping.current && !isTimeBasedStage) {
-      ambushTimer.current += 16 * timeScale.current * dt;
+      ambushTimer.current += dt * (1000 / 60) * timeScale.current;
       const aliveCount = enemies.current.filter(e => e.alive).length;
       const isBossWave = enemies.current.some(e => e.alive && e.isBoss);
       const ambushInterval = Math.max(9000, 12000 - waveRef.current * 250);
