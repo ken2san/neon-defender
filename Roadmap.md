@@ -156,10 +156,10 @@ Execution steps:
 
 | Run Date   | Build/Commit | Scenario                             | FPS p50 | FPS p95 | Frame ms p50 | Frame ms p95 | Enemies | Bullets | Enemy Bullets | Particles | Notes              |
 | ---------- | ------------ | ------------------------------------ | ------- | ------- | ------------ | ------------ | ------- | ------- | ------------- | --------- | ------------------ |
-| 2026-04-02 | de21773     | New Game / first 60s / std move+fire | -       | -       | -            | -            | -       | -       | -             | -         | run-1              |
-| 2026-04-02 | de21773     | New Game / first 60s / std move+fire | -       | -       | -            | -            | -       | -       | -             | -         | run-2              |
-| 2026-04-02 | de21773     | New Game / first 60s / std move+fire | -       | -       | -            | -            | -       | -       | -             | -         | run-3              |
-| 2026-04-02 | de21773     | Median (run-1..run-3)                | -       | -       | -            | -            | -       | -       | -             | -         | baseline reference |
+| 2026-04-02 | de21773      | New Game / first 60s / std move+fire | -       | -       | -            | -            | -       | -       | -             | -         | run-1              |
+| 2026-04-02 | de21773      | New Game / first 60s / std move+fire | -       | -       | -            | -            | -       | -       | -             | -         | run-2              |
+| 2026-04-02 | de21773      | New Game / first 60s / std move+fire | -       | -       | -            | -            | -       | -       | -             | -         | run-3              |
+| 2026-04-02 | de21773      | Median (run-1..run-3)                | -       | -       | -            | -            | -       | -       | -             | -         | baseline reference |
 
 - Next (execute in order)
   - Finalize P4-1 baseline capture table with 3 manual runs and median values
