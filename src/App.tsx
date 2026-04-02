@@ -2880,8 +2880,8 @@ export default function App() {
             });
           }
 
-          // Hit stop
-          hitStopTimer.current = 2;
+          // Hit stop (milliseconds)
+          hitStopTimer.current = Date.now() + 33;
 
           // EMP Burst
           if (relicsRef.current.some(r => r.id === 'EMP') && Math.random() < 0.1) {
@@ -4959,8 +4959,7 @@ export default function App() {
     dtRef.current = Math.min(2.0, elapsed / (1000 / 60));
 
     if (ctx) {
-      if (hitStopTimer.current > 0) {
-        hitStopTimer.current -= 1 * dtRef.current;
+      if (Date.now() < hitStopTimer.current) {
         draw(ctx);
       } else {
         update();
