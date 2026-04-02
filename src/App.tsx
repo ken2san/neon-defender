@@ -8,220 +8,17 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Rocket, Trophy, Play, RotateCcw, Loader2, Zap, Maximize2, Shield, Cpu, Heart, Users, Activity, MousePointer2 } from 'lucide-react';
 import { generateGameAssets } from './services/assetGenerator';
 import { audio } from './services/audio';
-
-// --- Constants ---
-const CANVAS_WIDTH = 600;
-const CANVAS_HEIGHT = 800;
-const PLAYER_WIDTH = 50;
-const PLAYER_HEIGHT = 50;
-const PLAYER_SPEED = 3.5;
-const SLINGSHOT_THRESHOLD = 250;
-const GRAZE_DISTANCE = 40;
-const MAX_OVERDRIVE = 100;
-const BULLET_SPEED = 8; // Synchronized speed
-const ENEMY_DIVE_SPEED = 3.0; // Slightly increased for better challenge balance
-const ENEMY_BULLET_SPEED = 3.5; // Synchronized speed
-const ENEMY_ROWS = 5;
-const ENEMY_COLS = 8;
-const ENEMY_SPACING = 55;
-const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || ('ontouchstart' in window);
-
-// --- Performance Constants ---
-const MAX_PARTICLES = isMobile ? 150 : 500;
-const MAX_TRAILS = isMobile ? 20 : 60;
-const MAX_BULLETS = isMobile ? 100 : 300;
-const MAX_ENEMY_BULLETS = isMobile ? 150 : 400;
-const ENABLE_SHADOWS = !isMobile;
-
-type GameState = 'LOADING' | 'START' | 'PLAYING' | 'GAME_OVER' | 'VICTORY' | 'STAGE_CLEAR' | 'UPGRADE' | 'RELIC_SELECT';
-
-interface Bullet {
-  x: number;
-  y: number;
-  vx?: number;
-  vy?: number;
-  damage?: number;
-  size?: number;
-  color?: string;
-  isHoming?: boolean;
-}
-
-interface Enemy {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  alive: boolean;
-  type: number;
-  isDiving: boolean;
-  isReturning: boolean;
-  diveX: number;
-  diveY: number;
-  originX: number;
-  originY: number;
-  diveType?: 'normal' | 'uturn' | 'zigzag' | 'sweep' | 'spread' | 'loop' | 'chase' | 'sine';
-  turnY?: number;
-  diveTime?: number;
-  diveStartX?: number;
-  diveStartY?: number;
-  isBoss?: boolean;
-  bossType?: BossType;
-  health?: number;
-  maxHealth?: number;
-  phase?: number;
-  moveDir?: number;
-  lastShotTime?: number;
-  laserHitTime?: number;
-  isTurret?: boolean;
-  isFinalBoss?: boolean;
-  tractorBeamTimer: number;
-  isTractorBeaming: boolean;
-  tractorBeamX: number;
-  // Entry path properties
-  state: 'ENTERING' | 'IN_FORMATION' | 'DIVING' | 'RETURNING' | 'TRACTOR_BEAM' | 'SWARM' | 'LASER' | 'DEAD' | 'BOSS';
-  path?: { x: number, y: number }[];
-  pathIndex?: number;
-  entryDelay?: number;
-  prevX?: number;
-  prevY?: number;
-  stunnedUntil: number;
-  speedScale: number;
-  amplitudeScale: number;
-  shield?: number;
-  maxShield?: number;
-  tentacles?: {
-    segments: { x: number, y: number, angle: number }[];
-    baseAngle: number;
-    targetAngle: number;
-    length: number;
-  }[];
-}
-
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  life: number;
-  maxLife: number;
-  color: string;
-  size: number;
-  type?: 'square' | 'line';
-  rotation?: number;
-  vr?: number;
-  isWarp?: boolean;
-}
-
-interface Trail {
-  x: number;
-  y: number;
-  life: number;
-  maxLife: number;
-  color: string;
-  width: number;
-}
-
-const NeonShip = ({ className = "", tension = 0 }: { className?: string, tension?: number }) => (
-  <svg viewBox="0 0 100 100" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <filter id="glow">
-        <feGaussianBlur stdDeviation={2.5 + tension * 2} result="coloredBlur"/>
-        <feMerge>
-          <feMergeNode in="coloredBlur"/>
-          <feMergeNode in="SourceGraphic"/>
-        </feMerge>
-      </filter>
-    </defs>
-    {/* Wings - They 'flex' with tension */}
-    <path
-      d={`M50 20 L${85 + tension * 5} ${75 - tension * 5} L50 65 L${15 - tension * 5} ${75 - tension * 5} Z`}
-      stroke="#00ffcc"
-      strokeWidth={3 + tension}
-      filter="url(#glow)"
-      strokeLinejoin="round"
-    />
-    {/* Cockpit */}
-    <path d="M50 35 L65 60 L50 55 L35 60 Z" stroke="#33ccff" strokeWidth="2" filter="url(#glow)" strokeLinejoin="round" />
-    {/* Engine Glow */}
-    <circle cx="50" cy="70" r={8 + tension * 10} fill={tension > 0.5 ? "#ffcc00" : "#ff3366"} filter="url(#glow)" opacity={0.6 + tension * 0.4}>
-      <animate attributeName="r" values={`${8 + tension * 5};${12 + tension * 10};${8 + tension * 5}`} dur="0.2s" repeatCount="indefinite" />
-      <animate attributeName="opacity" values="0.4;0.8;0.4" dur="0.2s" repeatCount="indefinite" />
-    </circle>
-  </svg>
-);
-
-interface PowerUp {
-  x: number;
-  y: number;
-  type: 'MULTISHOT' | 'SHIELD' | 'RAPIDFIRE';
-  life: number;
-}
-
-interface Scrap {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  life: number;
-}
-
-interface Asteroid {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  size: number;
-  speed: number;
-  rotation: number;
-  vr: number;
-  hp: number;
-  vertices: number[];
-}
-
-enum BossType {
-  TRACTOR = 'TRACTOR',
-  SWARM = 'SWARM',
-  LASER = 'LASER',
-  TENTACLE = 'TENTACLE'
-}
-
-interface Obstacle {
-  id: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  type: 'BUILDING' | 'WALL' | 'PILLAR' | 'TENTACLE';
-  hp: number;
-  maxHp: number;
-  color: string;
-  segments?: { x: number, y: number, angle: number }[];
-  baseX?: number;
-}
-
-interface DamageNumber {
-  x: number;
-  y: number;
-  value: number;
-  life: number;
-  maxLife: number;
-  color: string;
-  isCrit?: boolean;
-}
-
-interface TailSegment {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  lastHit?: number;
-}
-
-interface Drone {
-  angle: number;
-  distance: number;
-  lastShot: number;
-}
+import {
+  CANVAS_WIDTH, CANVAS_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT, PLAYER_SPEED,
+  SLINGSHOT_THRESHOLD, GRAZE_DISTANCE, MAX_OVERDRIVE, BULLET_SPEED,
+  ENEMY_DIVE_SPEED, ENEMY_BULLET_SPEED, ENEMY_ROWS, ENEMY_COLS, ENEMY_SPACING,
+  isMobile, MAX_PARTICLES, MAX_TRAILS, MAX_BULLETS, MAX_ENEMY_BULLETS, ENABLE_SHADOWS,
+} from './constants';
+import {
+  GameState, Bullet, Enemy, Particle, Trail, PowerUp, Scrap, Asteroid,
+  BossType, Obstacle, DamageNumber, TailSegment, Drone,
+} from './types';
+import NeonShip from './components/NeonShip';
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -5196,7 +4993,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#020205] text-white flex flex-col items-center justify-center font-mono overflow-hidden">
       {/* Consolidated Compact HUD (Genius Designer Style) */}
-      <div className="w-full max-w-[600px] px-4 mb-3 flex flex-col gap-2 z-[100] relative">
+      <div className="w-full max-w-150 px-4 mb-3 flex flex-col gap-2 z-100 relative">
         {/* Level & XP Bar (Top Full Width) */}
         <div className="w-full flex flex-col gap-1 mb-1">
           <div className="flex justify-between items-end px-1">
@@ -5206,7 +5003,7 @@ export default function App() {
             </div>
             <span className="text-[7px] text-gray-600 font-bold uppercase tracking-widest">{Math.floor(xp)} / {xpToNextLevel} XP</span>
           </div>
-          <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden border border-white/5 p-[1px]">
+          <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden border border-white/5 p-px">
             <motion.div
               animate={{ width: `${(xp / xpToNextLevel) * 100}%` }}
               className="h-full bg-[#00ffcc] shadow-[0_0_10px_rgba(0,255,204,0.8)] rounded-full"
@@ -5275,7 +5072,7 @@ export default function App() {
             <div className="flex flex-col items-end gap-2">
               <div className="flex items-center gap-3">
                 <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Overdrive</span>
-                <div className="w-36 h-3 bg-black/40 rounded-full overflow-hidden border border-white/10 p-[1px] relative transition-all">
+                <div className="w-36 h-3 bg-black/40 rounded-full overflow-hidden border border-white/10 p-px relative transition-all">
                   <motion.div
                     animate={overdrive >= MAX_OVERDRIVE && !isOverdriveActive
                       ? {
@@ -5300,10 +5097,10 @@ export default function App() {
         </div>
 
         {/* Progress Bar (Survival Timer) */}
-        <div className="w-full h-[3px] bg-white/5 relative overflow-hidden rounded-full mt-1">
+        <div className="w-full h-0.75 bg-white/5 relative overflow-hidden rounded-full mt-1">
           <motion.div
             animate={{ width: `${(1 - survivalTime / 30) * 100}%` }}
-            className="h-full bg-gradient-to-r from-[#ff3366] via-[#ffcc00] to-[#ff3366] shadow-[0_0_15px_rgba(255,51,102,0.6)]"
+            className="h-full bg-linear-to-r from-[#ff3366] via-[#ffcc00] to-[#ff3366] shadow-[0_0_15px_rgba(255,51,102,0.6)]"
           />
           <div className="absolute inset-0 flex items-center justify-center">
             <span className="text-[6px] text-white/40 font-bold uppercase tracking-[0.5em]">Sector_Progress</span>
@@ -5312,7 +5109,7 @@ export default function App() {
       </div>
 
       {/* Game Canvas Container with Ambient Glow and Scanlines */}
-      <div className="relative border-4 md:border-8 border-[#1a1a2e] rounded-xl shadow-[0_0_80px_rgba(0,255,204,0.15)] overflow-hidden max-w-[95vw] max-h-[70vh] aspect-[3/4] group">
+      <div className="relative border-4 md:border-8 border-[#1a1a2e] rounded-xl shadow-[0_0_80px_rgba(0,255,204,0.15)] overflow-hidden max-w-[95vw] max-h-[70vh] aspect-3/4 group">
         {/* Ambient Glow behind canvas */}
         <div className="absolute inset-0 bg-[#00ffcc]/5 blur-3xl rounded-full opacity-30 group-hover:opacity-60 transition-opacity duration-1000 -z-10" />
 
@@ -5325,7 +5122,7 @@ export default function App() {
         />
 
         {/* Scanline Overlay */}
-        <div className="absolute inset-0 pointer-events-none z-20 opacity-[0.04] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_2px,3px_100%]" />
+        <div className="absolute inset-0 pointer-events-none z-20 opacity-[0.04] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-size-[100%_2px,3px_100%]" />
 
         {/* CRT Vignette */}
         <div className="absolute inset-0 pointer-events-none z-20 shadow-[inset_0_0_100px_rgba(0,0,0,0.4)]" />
@@ -5333,7 +5130,7 @@ export default function App() {
         {/* Relic Inventory (VS Style) */}
         <div className="absolute top-16 left-4 flex flex-col gap-1 pointer-events-none">
           <span className="text-[8px] text-[#00ffcc]/40 font-bold uppercase tracking-widest">Tech_Inventory</span>
-          <div className="flex gap-1 max-w-[120px] flex-wrap">
+          <div className="flex gap-1 max-w-30 flex-wrap">
             {relics.map((relic, i) => (
               <motion.div
                 key={`${relic.id}-${i}`}
@@ -5407,7 +5204,7 @@ export default function App() {
               <motion.div
                 initial={{ width: '100%' }}
                 animate={{ width: `${(bossHealth.current / bossHealth.max) * 100}%` }}
-                className="h-full bg-gradient-to-r from-[#ff3366] to-[#ffcc00] shadow-[0_0_10px_#ff3366]"
+                className="h-full bg-linear-to-r from-[#ff3366] to-[#ffcc00] shadow-[0_0_10px_#ff3366]"
               />
               <div className="absolute inset-0 flex items-center justify-center">
                 <span className="text-[8px] font-bold uppercase tracking-widest text-white drop-shadow-md">Boss Integrity</span>
@@ -5423,11 +5220,11 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/90 z-[60] flex flex-col items-center justify-center p-8 backdrop-blur-md"
+              className="absolute inset-0 bg-black/90 z-60 flex flex-col items-center justify-center p-8 backdrop-blur-md"
             >
               {/* Background Micro-details */}
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#00ffcc]/50 to-transparent" />
-              <div className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#00ffcc]/50 to-transparent" />
+              <div className="absolute top-0 left-0 w-full h-1 bg-linear-to-r from-transparent via-[#00ffcc]/50 to-transparent" />
+              <div className="absolute bottom-0 left-0 w-full h-1 bg-linear-to-r from-transparent via-[#00ffcc]/50 to-transparent" />
               <div className="absolute top-4 left-4 text-[8px] text-[#00ffcc]/30 font-mono">SYSTEM_UPGRADE_PROTOCOL_v2.4</div>
               <div className="absolute bottom-4 right-4 text-[8px] text-[#00ffcc]/30 font-mono">AWAITING_PILOT_INPUT...</div>
 
@@ -5483,7 +5280,7 @@ export default function App() {
                   initial={{ width: 0 }}
                   animate={{ width: '100%' }}
                   transition={{ duration: 0.5, delay: 0.2 }}
-                  className="absolute -top-6 left-0 h-[2px] bg-gradient-to-r from-transparent via-[#00ffcc] to-transparent"
+                  className="absolute -top-6 left-0 h-0.5 bg-linear-to-r from-transparent via-[#00ffcc] to-transparent"
                 />
                 <div className="relative">
                   <h2 className={`text-5xl md:text-7xl font-black tracking-[0.3em] italic drop-shadow-[0_0_30px_rgba(255,255,255,0.8)] ${(wave === 6 || wave === 10) ? 'text-[#ff3366]' : 'text-white'}`}>
@@ -5510,7 +5307,7 @@ export default function App() {
                   initial={{ width: 0 }}
                   animate={{ width: '100%' }}
                   transition={{ duration: 0.5, delay: 0.2 }}
-                  className="absolute -bottom-6 left-0 h-[2px] bg-gradient-to-r from-transparent via-[#ff3366] to-transparent"
+                  className="absolute -bottom-6 left-0 h-0.5 bg-linear-to-r from-transparent via-[#ff3366] to-transparent"
                 />
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
@@ -5540,7 +5337,7 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black flex flex-col items-center justify-center p-8 text-center z-[100]"
+              className="absolute inset-0 bg-black flex flex-col items-center justify-center p-8 text-center z-100"
             >
               <Loader2 size={48} className="text-[#00ffcc] animate-spin mb-4" />
               <p className="text-[#00ffcc] uppercase tracking-[0.5em] text-sm animate-pulse">
@@ -5555,12 +5352,12 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-[#020205] flex flex-col items-center justify-center overflow-hidden z-[100]"
+              className="absolute inset-0 bg-[#020205] flex flex-col items-center justify-center overflow-hidden z-100"
             >
               {/* High-End Background Elements */}
               <div className="absolute inset-0 pointer-events-none">
                 {/* Large, very subtle radial gradient */}
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-gradient-radial from-[#00ffcc]/10 to-transparent opacity-30" />
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-200 h-200 bg-gradient-radial from-[#00ffcc]/10 to-transparent opacity-30" />
 
                 {/* Technical Grid Accent */}
                 <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'radial-gradient(#00ffcc 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
@@ -5607,7 +5404,7 @@ export default function App() {
                     initial={{ scaleX: 0 }}
                     animate={{ scaleX: 1 }}
                     transition={{ delay: 0.5, duration: 0.8 }}
-                    className="absolute -top-4 left-1/2 -translate-x-1/2 w-12 h-[1px] bg-[#00ffcc]/40"
+                    className="absolute -top-4 left-1/2 -translate-x-1/2 w-12 h-px bg-[#00ffcc]/40"
                   />
 
                   <h1 className="flex flex-col items-center leading-none">
@@ -5652,7 +5449,7 @@ export default function App() {
                     </span>
 
                     {/* Internal Scanline Effect */}
-                    <div className="absolute inset-0 opacity-0 group-hover:opacity-10 pointer-events-none bg-[linear-gradient(transparent_50%,rgba(0,255,204,0.5)_50%)] bg-[length:100%_4px]" />
+                    <div className="absolute inset-0 opacity-0 group-hover:opacity-10 pointer-events-none bg-[linear-gradient(transparent_50%,rgba(0,255,204,0.5)_50%)] bg-size-[100%_4px]" />
                   </button>
 
                   {/* High-End Stats Display */}
@@ -5683,7 +5480,7 @@ export default function App() {
                   <div className="w-1 h-1 bg-white rounded-full self-center" />
                   <span>Release to Snap</span>
                 </div>
-                <div className="w-32 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                <div className="w-32 h-px bg-linear-to-r from-transparent via-white/20 to-transparent" />
               </div>
             </motion.div>
           )}
@@ -5731,7 +5528,7 @@ export default function App() {
               key="game-over-screen"
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="absolute inset-0 bg-black/95 flex flex-col items-center justify-center p-8 text-center z-[100]"
+              className="absolute inset-0 bg-black/95 flex flex-col items-center justify-center p-8 text-center z-100"
             >
               <Trophy size={64} className="text-[#ffcc00] mb-6 drop-shadow-[0_0_20px_rgba(255,204,0,0.3)]" />
               <h2 className="text-5xl font-black mb-2 text-[#ff3366] tracking-tighter">MISSION FAILED</h2>
