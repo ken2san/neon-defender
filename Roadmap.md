@@ -120,8 +120,8 @@ Raise the quality bar on performance, mobile UX, and audio.
     - Star warp/scroll movement now multiplies by `dtRef.current`
     - Particle movement confirmed dt-consistent in all paths
 - In Progress
-  - P4-1: Run 60s baseline captures per fixed scenario and compare perf overlay values (manual action required)
 - Completed
+  - P4-1: Run 60s baseline captures per fixed scenario and compare perf overlay values
   - P4-2: Mobile touch control refinement
     - Tuned touch double-tap window to reduce accidental slingshot activation
     - Reduced touch slingshot deadzone and adjusted resistance for more responsive drag feel
@@ -156,13 +156,12 @@ Execution steps:
 
 | Run Date   | Build/Commit | Scenario                             | FPS p50 | FPS p95 | Frame ms p50 | Frame ms p95 | Enemies | Bullets | Enemy Bullets | Particles | Notes              |
 | ---------- | ------------ | ------------------------------------ | ------- | ------- | ------------ | ------------ | ------- | ------- | ------------- | --------- | ------------------ |
-| 2026-04-02 | de21773      | New Game / first 60s / std move+fire | -       | -       | -            | -            | -       | -       | -             | -         | run-1              |
-| 2026-04-02 | de21773      | New Game / first 60s / std move+fire | -       | -       | -            | -            | -       | -       | -             | -         | run-2              |
-| 2026-04-02 | de21773      | New Game / first 60s / std move+fire | -       | -       | -            | -            | -       | -       | -             | -         | run-3              |
-| 2026-04-02 | de21773      | Median (run-1..run-3)                | -       | -       | -            | -            | -       | -       | -             | -         | baseline reference |
+| 2026-04-02 | de21773      | New Game / first 60s / std move+fire | 125.0   | 125.0   | 8.00         | 9.00         | 5       | 3       | 20            | 0         | run-1              |
+| 2026-04-02 | de21773      | New Game / first 60s / std move+fire | 125.0   | 142.9   | 8.00         | 9.00         | 3       | 32      | 15            | 24        | run-2              |
+| 2026-04-02 | de21773      | New Game / first 60s / std move+fire | 125.0   | 125.0   | 8.00         | 9.00         | 6       | 3       | 6             | 15        | run-3              |
+| 2026-04-02 | de21773      | Median (run-1..run-3)                | 125.0   | 125.0   | 8.00         | 9.00         | 5       | 3       | 15            | 15        | baseline reference |
 
 - Next (execute in order)
-  - Finalize P4-1 baseline capture table with 3 manual runs and median values
   - Compare current build against baseline and accept/reject each polish unit under Phase 4 Exit Criteria
 
 ### Phase 4 Exit Criteria
