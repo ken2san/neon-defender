@@ -977,12 +977,13 @@ export default function App() {
         return;
       }
 
-      // Reset targetPos to dash destination (Free-Roam)
-      // Instead of returning to home, we dash forward
-      const dashDist = dist * 1.8;
+      // Deterministic landing: snap destination is fixed on the threshold ring.
+      // This makes the stop point predictable while dragging.
+      const landingCenterX = homeX + dirX * SLINGSHOT_THRESHOLD;
+      const landingCenterY = homeY + dirY * SLINGSHOT_THRESHOLD;
       targetPos.current = {
-        x: Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerPos.current.x + dirX * dashDist)),
-        y: Math.max(CANVAS_HEIGHT * 0.1, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerPos.current.y + dirY * dashDist))
+        x: Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, landingCenterX - PLAYER_WIDTH / 2)),
+        y: Math.max(CANVAS_HEIGHT * 0.1, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, landingCenterY - PLAYER_HEIGHT / 2))
       };
 
       // Flick Detection
@@ -4666,6 +4667,32 @@ export default function App() {
             ctx.setLineDash([10, 20]);
             ctx.stroke();
             ctx.setLineDash([]);
+
+            // Predicted landing point on the threshold ring (release stop position)
+            if (dist > 5) {
+              const pullMag = Math.sqrt(dx * dx + dy * dy) || 1;
+              const pullDirX = -dx / pullMag;
+              const pullDirY = -dy / pullMag;
+              const predictedCenterX = sCenterX + pullDirX * SLINGSHOT_THRESHOLD;
+              const predictedCenterY = sCenterY + pullDirY * SLINGSHOT_THRESHOLD;
+
+              ctx.beginPath();
+              ctx.arc(predictedCenterX, predictedCenterY, 10, 0, Math.PI * 2);
+              ctx.fillStyle = 'rgba(0, 255, 204, 0.22)';
+              ctx.fill();
+
+              ctx.beginPath();
+              ctx.arc(predictedCenterX, predictedCenterY, 4, 0, Math.PI * 2);
+              ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+              ctx.fill();
+
+              ctx.beginPath();
+              ctx.moveTo(sCenterX, sCenterY);
+              ctx.lineTo(predictedCenterX, predictedCenterY);
+              ctx.strokeStyle = 'rgba(0, 255, 204, 0.3)';
+              ctx.lineWidth = 1.5;
+              ctx.stroke();
+            }
 
             // 1. Tension Visuals
             const tension = dist / SLINGSHOT_THRESHOLD;
