@@ -38,6 +38,8 @@ const TOUCH_DOUBLE_TAP_WINDOW_MS = 460;
 const TOUCH_SLINGSHOT_CHARGE_DEADZONE = 18;
 const TOUCH_SLINGSHOT_RESISTANCE = 0.3;
 const TOUCH_INPUT_VELOCITY_SMOOTHING = 0.55;
+const INPUT_WATCHDOG_RELEASE_MS = 280;
+const INPUT_WATCHDOG_HARD_RELEASE_MS = 1200;
 
 const VFX_PARTICLE_DESKTOP_MULTIPLIER = 0.75;
 const VFX_PARTICLE_MOBILE_MULTIPLIER = 0.18;
@@ -209,6 +211,7 @@ export default function App() {
   const slingshotArmedPos = useRef<{ x: number, y: number } | null>(null);
   const isVirtualDragActive = useRef(false);
   const virtualDragReleaseTimer = useRef<number | null>(null);
+  const lastInputActivityAt = useRef(0);
   // Idle-fire: fire slingshot when mousemove stops (finger lifted on trackpad before OS sends mouseup)
   const idleFireTimer = useRef<number | null>(null);
   const slingshotAttackUntil = useRef(0);
@@ -576,6 +579,7 @@ export default function App() {
     slingshotShieldRadius.current = 56;
     slingshotShieldObstacleRecoilAt.current = 0;
     slingshotObstacleKickAt.current = 0;
+    lastInputActivityAt.current = 0;
   };
 
   const normalizeAngle = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
@@ -907,6 +911,10 @@ export default function App() {
 
   // Input handling
   useEffect(() => {
+    const markInputActivity = () => {
+      lastInputActivityAt.current = Date.now();
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyS', 'KeyA', 'KeyD'].includes(e.code)) {
         e.preventDefault();
@@ -926,6 +934,7 @@ export default function App() {
 
       // Allow Ctrl to trigger Slingshot Mode during an active drag
       if (!e.repeat && (e.code === 'ControlLeft' || e.code === 'ControlRight') && isMouseDown.current && !isSlingshotMode.current) {
+        markInputActivity();
         isSlingshotMode.current = true;
         // Ctrl-based anchor: treat as a real drag (not virtual) so mouseup fires instantly
         isVirtualDragActive.current = false;
@@ -951,6 +960,7 @@ export default function App() {
     const handlePointerDown = (e: PointerEvent) => {
       if (gameState !== 'PLAYING' || showUpgrade) return;
       if (e.pointerType !== 'mouse' || e.button !== 0) return;
+      markInputActivity();
 
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -998,6 +1008,7 @@ export default function App() {
     const handleTouchStart = (e: TouchEvent) => {
       if (gameState !== 'PLAYING' || showUpgrade) return;
       e.preventDefault();
+      markInputActivity();
       if (idleFireTimer.current !== null) {
         window.clearTimeout(idleFireTimer.current);
         idleFireTimer.current = null;
@@ -1093,6 +1104,7 @@ export default function App() {
     const handleTouchMove = (e: TouchEvent) => {
       if (!isTouching.current || showUpgrade) return;
       e.preventDefault();
+      markInputActivity();
 
       const touch = e.touches[0];
       const rect = canvasRef.current?.getBoundingClientRect();
@@ -1386,6 +1398,7 @@ export default function App() {
     };
 
     const handleTouchEnd = (e: TouchEvent) => {
+      markInputActivity();
       if (idleFireTimer.current !== null) {
         window.clearTimeout(idleFireTimer.current);
         idleFireTimer.current = null;
@@ -1411,6 +1424,7 @@ export default function App() {
 
     const handleMouseDown = (e: MouseEvent) => {
       if (gameState !== 'PLAYING' || showUpgrade) return;
+      markInputActivity();
       isVirtualDragActive.current = false;
       clearVirtualDragReleaseTimer();
 
@@ -1473,6 +1487,7 @@ export default function App() {
 
     const handleMouseMove = (e: MouseEvent) => {
       if (gameState !== 'PLAYING' || showUpgrade) return;
+      markInputActivity();
 
       // Web/trackpad safety: if mouseup was swallowed by gesture handling,
       // force-release stale drag state when no button is currently pressed.
@@ -1574,6 +1589,7 @@ export default function App() {
     };
 
     const handleMouseUp = () => {
+      markInputActivity();
       isVirtualDragActive.current = false;
       clearVirtualDragReleaseTimer();
       if (idleFireTimer.current !== null) { window.clearTimeout(idleFireTimer.current); idleFireTimer.current = null; }
@@ -1598,6 +1614,7 @@ export default function App() {
     };
 
     const handleBlur = () => {
+      markInputActivity();
       clearVirtualDragReleaseTimer();
       if (idleFireTimer.current !== null) { window.clearTimeout(idleFireTimer.current); idleFireTimer.current = null; }
       isVirtualDragActive.current = false;
@@ -1722,6 +1739,25 @@ export default function App() {
     const effectiveTrippy = trippyIntensity.current + pulseRef.current * 0.15 * trippyIntensity.current;
 
     if (gameState !== 'PLAYING' || showUpgrade) return;
+
+    // Input watchdog: recover from macOS gesture paths that leave drag flags stuck.
+    const watchdogNow = Date.now();
+    if (lastInputActivityAt.current > 0) {
+      const idleMs = watchdogNow - lastInputActivityAt.current;
+      const staleVirtualDrag = isVirtualDragActive.current && idleMs > INPUT_WATCHDOG_RELEASE_MS;
+      const staleMouseDrag = isMouseDown.current && !isTouching.current && idleMs > INPUT_WATCHDOG_HARD_RELEASE_MS;
+      if (staleVirtualDrag || staleMouseDrag) {
+        isVirtualDragActive.current = false;
+        isMouseDown.current = false;
+        isTouching.current = false;
+        isSlingshotMode.current = false;
+        isSlingshotCharged.current = false;
+        mouseAnchorPos.current = null;
+        keysPressed.current['TouchFire'] = false;
+        inputVel.current = { x: 0, y: 0 };
+        inputHistory.current = [];
+      }
+    }
 
     // Keep object counts within a soft budget when frame time worsens.
     if (enemyBullets.current.length > (isCriticalSim ? 140 : isReducedSim ? 200 : 260)) {
@@ -6004,6 +6040,15 @@ export default function App() {
             <div>FPS p50 {perfStats.fpsP50.toFixed(1)} | p95 {perfStats.fpsP95.toFixed(1)}</div>
             <div>Frame p50 {perfStats.frameMsP50.toFixed(2)}ms | p95 {perfStats.frameMsP95.toFixed(2)}ms</div>
             <div>Obj E:{perfStats.enemies} PB:{perfStats.bullets} EB:{perfStats.enemyBullets} P:{perfStats.particles}</div>
+          </div>
+        )}
+
+        {import.meta.env.DEV && gameState === 'PLAYING' && (
+          <div className="absolute bottom-22 right-4 pointer-events-none bg-black/65 border border-[#ffcc00]/30 rounded px-2 py-1.5 text-[9px] leading-tight text-[#ffe9b3] font-mono z-30">
+            <div className="text-[8px] text-[#ffcc00] uppercase tracking-widest mb-1">Input_Debug</div>
+            <div>Mouse:{isMouseDown.current ? '1' : '0'} Touch:{isTouching.current ? '1' : '0'} Virtual:{isVirtualDragActive.current ? '1' : '0'}</div>
+            <div>Sling:{isSlingshotMode.current ? '1' : '0'} Charged:{isSlingshotCharged.current ? '1' : '0'} Armed:{slingshotArmed.current ? '1' : '0'}</div>
+            <div>Idle:{Math.max(0, Date.now() - lastInputActivityAt.current)}ms Anchor:{mouseAnchorPos.current ? '1' : '0'}</div>
           </div>
         )}
 
