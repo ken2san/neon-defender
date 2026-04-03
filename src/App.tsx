@@ -3251,12 +3251,18 @@ export default function App() {
 
     for (let i = 0; i < aliveEnemies.length; i++) {
       const enemy = aliveEnemies[i];
-      if (enemy.x < px + pw &&
-          enemy.x + enemy.width > px &&
-          enemy.y < py + ph &&
-          enemy.y + enemy.height > py) {
+      const inPlayerBox = (
+        enemy.x < px + pw &&
+        enemy.x + enemy.width > px &&
+        enemy.y < py + ph &&
+        enemy.y + enemy.height > py
+      );
+      // Shield arc catches enemies even before they reach the player body
+      const shieldCatch = !isSlingshotAttacking && !isOverdriveActiveRef.current
+        && doesShieldCatchRect(enemy.x, enemy.y, enemy.width, enemy.height, 10);
+      if (!inPlayerBox && !shieldCatch) continue;
 
-        if (isSlingshotAttacking || isOverdriveActiveRef.current) {
+      if ((isSlingshotAttacking || isOverdriveActiveRef.current) && inPlayerBox) {
           // Offensive collision: Damage enemy
           const damage = isOverdriveActiveRef.current ? 1000 : 150;
           enemy.health! -= damage;
@@ -3283,7 +3289,7 @@ export default function App() {
           // Bounce slightly on impact to feel 'physical'
           playerVel.current.x *= 0.8;
           playerVel.current.y *= 0.8;
-        } else if (doesShieldCatchRect(enemy.x, enemy.y, enemy.width, enemy.height, 10)) {
+      } else if (shieldCatch) {
           const enemyCenterX = enemy.x + enemy.width / 2;
           const enemyCenterY = enemy.y + enemy.height / 2;
           const dx = enemyCenterX - playerCenterX;
@@ -3299,9 +3305,8 @@ export default function App() {
           const shieldOdCost = enemy.isBoss ? 20 : 12;
           overdriveGauge.current = Math.max(0, overdriveGauge.current - shieldOdCost);
           setOverdrive(overdriveGauge.current);
-        } else {
+      } else if (inPlayerBox) {
           playerHit = true;
-        }
       }
     }
 
