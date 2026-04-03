@@ -56,11 +56,20 @@ const SLINGSHOT_GUARD_SMALL_MS = 280;
 const SLINGSHOT_GUARD_LARGE_MS = 450;
 const SLINGSHOT_COMBO_WINDOW_MS = 1200;
 const SLINGSHOT_ATTACK_PREVIEW_THRESHOLD = SLINGSHOT_THRESHOLD + 30;
-const SLINGSHOT_MOBILE_ATTACK_MAX_DISTANCE = 560;
-const SLINGSHOT_MOBILE_ATTACK_DISTANCE_MULTIPLIER = 1.4;
+// Slingshot tier thresholds and landing distances expressed in screen pixels.
+// getSlingshotLandingDistance converts to/from canvas pixels using canvasScaleRef,
+// so the physical finger effort and visual jump feel the same on any screen size.
+const SLINGSHOT_TIER1_SCREEN_THRESH = 44;   // screen px of pull past preview threshold
+const SLINGSHOT_TIER2_SCREEN_THRESH = 104;
+const SLINGSHOT_TIER3_SCREEN_THRESH = 168;
+const SLINGSHOT_TIER1_SCREEN_LAND = 160;    // screen px of movement on release
+const SLINGSHOT_TIER2_SCREEN_LAND = 304;
+const SLINGSHOT_TIER3_SCREEN_LAND = 448;
+const SLINGSHOT_TIER4_SCREEN_LAND = 544;
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasScaleRef = useRef(1); // rect.height / CANVAS_HEIGHT — updated in pointer event handlers
   const [gameState, setGameState] = useState<GameState>('LOADING');
   const [score, setScore] = useState(0);
   const [highScore, setHighScore] = useState(0);
@@ -584,15 +593,20 @@ export default function App() {
   };
 
   const getSlingshotLandingDistance = (pullDist: number) => {
-    if (!isMobile) return SLINGSHOT_THRESHOLD;
-
+    const scale = canvasScaleRef.current;
     const attackDist = Math.max(0, pullDist - SLINGSHOT_ATTACK_PREVIEW_THRESHOLD);
     if (attackDist <= 0) return SLINGSHOT_THRESHOLD;
 
-    return Math.min(
-      SLINGSHOT_MOBILE_ATTACK_MAX_DISTANCE,
-      380 + attackDist * SLINGSHOT_MOBILE_ATTACK_DISTANCE_MULTIPLIER,
-    );
+    // Convert canvas-pixel pull to screen pixels for device-agnostic thresholds.
+    // Same physical drag effort produces the same tier on any screen size.
+    const attackScreen = attackDist * scale;
+    let landingScreen: number;
+    if (attackScreen < SLINGSHOT_TIER1_SCREEN_THRESH) landingScreen = SLINGSHOT_TIER1_SCREEN_LAND;
+    else if (attackScreen < SLINGSHOT_TIER2_SCREEN_THRESH) landingScreen = SLINGSHOT_TIER2_SCREEN_LAND;
+    else if (attackScreen < SLINGSHOT_TIER3_SCREEN_THRESH) landingScreen = SLINGSHOT_TIER3_SCREEN_LAND;
+    else landingScreen = SLINGSHOT_TIER4_SCREEN_LAND;
+
+    return landingScreen / scale;
   };
 
   const startNextWave = () => {
@@ -926,6 +940,7 @@ export default function App() {
       const touch = e.touches[0];
       const rect = canvasRef.current?.getBoundingClientRect();
       if (rect) {
+        canvasScaleRef.current = rect.height / CANVAS_HEIGHT;
         const x = ((touch.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
         const y = ((touch.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
         touchStartPos.current = { x, y };
@@ -995,6 +1010,7 @@ export default function App() {
       const touch = e.touches[0];
       const rect = canvasRef.current?.getBoundingClientRect();
       if (rect) {
+        canvasScaleRef.current = rect.height / CANVAS_HEIGHT;
         const x = ((touch.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
         const y = ((touch.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
 
@@ -1313,6 +1329,7 @@ export default function App() {
 
       const rect = canvasRef.current?.getBoundingClientRect();
       if (rect) {
+        canvasScaleRef.current = rect.height / CANVAS_HEIGHT;
         const now = Date.now();
         const isRightClick = e.button === 2 || (e.button === 0 && e.ctrlKey);
 
@@ -1378,6 +1395,7 @@ export default function App() {
 
       const rect = canvasRef.current?.getBoundingClientRect();
       if (rect) {
+        canvasScaleRef.current = rect.height / CANVAS_HEIGHT;
         const x = ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
         const y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
 
