@@ -14,6 +14,12 @@ export const getStageLabelFromWave = (wave: number): string => {
   return `${STAGE_NAMES[stage - 1]} - SECTOR ${sector}`;
 };
 
+export const isSurvivalStage = (stage: number): boolean => {
+  return stage === 2 || stage === 3 || stage === 4;
+};
+
 export const getSurvivalDurationFromStage = (stage: number): number => {
-  return stage === 2 || stage === 3 ? 45 : 30;
+  if (stage === 2 || stage === 3) return 45;
+  if (isSurvivalStage(stage)) return 30;
+  return 30;
 };

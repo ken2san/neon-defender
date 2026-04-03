@@ -6,6 +6,7 @@ import {
   getStageFromWave,
   getStageLabelFromWave,
   getSurvivalDurationFromStage,
+  isSurvivalStage,
 } from './stage';
 
 describe('stage helpers', () => {
@@ -33,8 +34,17 @@ describe('stage helpers', () => {
   it('returns stage-dependent survival duration', () => {
     expect(getSurvivalDurationFromStage(2)).toBe(45);
     expect(getSurvivalDurationFromStage(3)).toBe(45);
+    expect(getSurvivalDurationFromStage(4)).toBe(30);
     expect(getSurvivalDurationFromStage(1)).toBe(30);
     expect(getSurvivalDurationFromStage(5)).toBe(30);
+  });
+
+  it('flags chase as a survival stage', () => {
+    expect(isSurvivalStage(2)).toBe(true);
+    expect(isSurvivalStage(3)).toBe(true);
+    expect(isSurvivalStage(4)).toBe(true);
+    expect(isSurvivalStage(1)).toBe(false);
+    expect(isSurvivalStage(5)).toBe(false);
   });
 
   it('exposes expected stage names ordering', () => {
