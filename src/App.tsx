@@ -743,7 +743,9 @@ export default function App() {
     } else if (currentStage >= 4) {
       wallDensity = 0.06 + (waveRef.current - 7) * 0.02;
       destructibleDensity = 0.12 + (waveRef.current - 7) * 0.03;
-      tentacleChance = 0.05;
+      // Chase stage: reduce tentacle chance under load
+      const isChaseLoad = renderLoadTierRef.current;
+      tentacleChance = isChaseLoad >= 2 ? 0.01 : isChaseLoad === 1 ? 0.02 : 0.05;
     }
 
     for (let i = 0; i < 10; i++) {
@@ -3167,13 +3169,22 @@ export default function App() {
           enemy.x += (p2.x - p1.x);
           enemy.y += (p2.y - p1.y);
         } else if (enemy.diveType === 'chase') {
-          const dx = (enemy.diveX || 0) - enemy.x;
-          const dy = (enemy.diveY || 0) - enemy.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist > 5) {
-            enemy.x += (dx / dist) * enemy.speedScale * currentEnemyDiveSpeed * 1.5 * dt;
-            enemy.y += (dy / dist) * enemy.speedScale * currentEnemyDiveSpeed * 1.5 * dt;
+          // Under reduced sim, use stride sampling for chase enemies (skip sqrt every frame)
+          const chaseEnemyStride = isCriticalSim ? 4 : isReducedSim ? 2 : 1;
+          const shouldUpdateChase = frameCounterRef.current % chaseEnemyStride === 0;
+
+          if (shouldUpdateChase) {
+            const dx = (enemy.diveX || 0) - enemy.x;
+            const dy = (enemy.diveY || 0) - enemy.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 5) {
+              enemy.x += (dx / dist) * enemy.speedScale * currentEnemyDiveSpeed * 1.5 * dt;
+              enemy.y += (dy / dist) * enemy.speedScale * currentEnemyDiveSpeed * 1.5 * dt;
+            } else {
+              enemy.y += currentEnemyDiveSpeed * enemy.speedScale * dt;
+            }
           } else {
+            // Keep position unchanged this frame
             enemy.y += currentEnemyDiveSpeed * enemy.speedScale * dt;
           }
         } else {
@@ -4065,6 +4076,7 @@ export default function App() {
     const isReducedBossFx = drawLoadTier >= 1;
     const isMinimalBossFx = drawLoadTier >= 2;
     const isChase = currentStage === 4;
+    const isChaseLoadReduced = isChase && drawLoadTier >= 1;  // Skip fancy Chase rendering under load
     stars.current.forEach(s => {
       if (warpFactor.current > 0.1) {
         // Radial movement during warp
@@ -4101,7 +4113,7 @@ export default function App() {
         }
         ctx.fillStyle = `rgba(255, 255, 255, ${s.opacity})`;
 
-        if (isChase) {
+        if (isChase && !isChaseLoadReduced) {  // Skip fancy lines under load
           const stretch = 5;
           ctx.strokeStyle = `rgba(255, 255, 255, ${s.opacity * 0.5})`;
           ctx.lineWidth = s.size;
@@ -5579,8 +5591,8 @@ export default function App() {
 
     mainCtx.save();
 
-    // Kaleidoscope / Mirror Effect (Trippy)
-    if (trippyIntensity.current > 0.7) {
+    // Kaleidoscope / Mirror Effect (Trippy) - Skip under load
+    if (trippyIntensity.current > 0.7 && renderLoadTierRef.current === 0) {
       mainCtx.save();
       mainCtx.translate(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
       mainCtx.scale(-1, 1);
@@ -5590,8 +5602,8 @@ export default function App() {
       mainCtx.restore();
     }
 
-    // Trippy Hue Rotation - Disabled on mobile
-    if (trippyIntensity.current > 0.1 && !isMobile) {
+    // Trippy Hue Rotation - Disabled on mobile and under load tier 1+
+    if (trippyIntensity.current > 0.1 && !isMobile && renderLoadTierRef.current === 0) {
       const hue = (Date.now() / 50) % 360;
       mainCtx.filter = `hue-rotate(${hue * trippyIntensity.current}deg) saturate(${100 + trippyIntensity.current * 100}%)`;
     }
@@ -5689,15 +5701,26 @@ export default function App() {
       // Adaptive quality control with hysteresis: reduce expensive full-screen effects only when needed.
       const prevTier = renderLoadTierRef.current;
       let nextTier = prevTier;
-      if (p95Frame > 48) nextTier = 2;
-      else if (p95Frame > 36) nextTier = 1;
-      else if (p95Frame < 28) nextTier = 0;
+      const isChaseStage = currentStage === 4;
+
+      // Chase stage: more aggressive thresholds (kicker-in earlier)
+      if (isChaseStage) {
+        if (p95Frame > 42) nextTier = 2;
+        else if (p95Frame > 32) nextTier = 1;
+        else if (p95Frame < 24) nextTier = 0;
+      } else {
+        // Other stages: original thresholds
+        if (p95Frame > 48) nextTier = 2;
+        else if (p95Frame > 36) nextTier = 1;
+        else if (p95Frame < 28) nextTier = 0;
+      }
       renderLoadTierRef.current = nextTier;
 
       let nextSimulationTier = simulationLoadTierRef.current;
-      if (p95Frame > 54) nextSimulationTier = 2;
-      else if (p95Frame > 40) nextSimulationTier = 1;
-      else if (p95Frame < 30) nextSimulationTier = 0;
+      // Tighter thresholds for simulation tier
+      if (p95Frame > 50) nextSimulationTier = 2;
+      else if (p95Frame > 38) nextSimulationTier = 1;
+      else if (p95Frame < 28) nextSimulationTier = 0;
       simulationLoadTierRef.current = nextSimulationTier;
 
       setPerfStats({
