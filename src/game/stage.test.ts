@@ -32,6 +32,7 @@ describe('stage helpers', () => {
 
   it('returns stage-dependent survival duration', () => {
     expect(getSurvivalDurationFromStage(2)).toBe(45);
+    expect(getSurvivalDurationFromStage(3)).toBe(45);
     expect(getSurvivalDurationFromStage(1)).toBe(30);
     expect(getSurvivalDurationFromStage(5)).toBe(30);
   });

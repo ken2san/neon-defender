@@ -245,6 +245,8 @@ export default function App() {
   const fpsSamples = useRef<number[]>([]);
   const lastPerfUiUpdateAt = useRef(0);
   const renderLoadTierRef = useRef(0); // 0=full, 1=reduced, 2=minimal
+  const simulationLoadTierRef = useRef(0); // 0=full, 1=reduced, 2=critical
+  const frameCounterRef = useRef(0);
   const [survivalTime, setSurvivalTime] = useState(30);
   const survivalTimerRef = useRef(30);
   const [isWarpingState, setIsWarpingState] = useState(false);
@@ -1612,6 +1614,9 @@ export default function App() {
     if (Date.now() < hitStopTimer.current) return;
 
     const dt = dtRef.current;
+    const simulationTier = simulationLoadTierRef.current;
+    const isReducedSim = simulationTier >= 1;
+    const isCriticalSim = simulationTier >= 2;
 
     // Warp logic should run even if not in PLAYING state (e.g. STAGE_CLEAR)
     if (isWarping.current) {
@@ -1647,6 +1652,14 @@ export default function App() {
     const effectiveTrippy = trippyIntensity.current + pulseRef.current * 0.15 * trippyIntensity.current;
 
     if (gameState !== 'PLAYING' || showUpgrade) return;
+
+    // Keep object counts within a soft budget when frame time worsens.
+    if (enemyBullets.current.length > (isCriticalSim ? 140 : isReducedSim ? 200 : 260)) {
+      enemyBullets.current.splice(0, enemyBullets.current.length - (isCriticalSim ? 140 : isReducedSim ? 200 : 260));
+    }
+    if (particles.current.length > (isCriticalSim ? 520 : isReducedSim ? 760 : 1000)) {
+      particles.current.splice(0, particles.current.length - (isCriticalSim ? 520 : isReducedSim ? 760 : 1000));
+    }
 
     const isAsteroidBelt = currentStage === 2;
     const isFinalFront = currentStage === 5;
@@ -3749,7 +3762,8 @@ export default function App() {
     }
 
     // Update particles
-    if (isWarping.current && Math.random() > 0.6) {
+    const warpParticleGate = isCriticalSim ? 0.9 : isReducedSim ? 0.78 : 0.6;
+    if (isWarping.current && Math.random() > warpParticleGate) {
       particles.current.push({
         x: Math.random() * CANVAS_WIDTH,
         y: Math.random() * CANVAS_HEIGHT,
@@ -3796,7 +3810,7 @@ export default function App() {
     }
 
     // Wave Completion Logic
-    const isTimeBasedStage = currentStage === 2; // Asteroid Belt is survival based
+    const isTimeBasedStage = currentStage === 2 || currentStage === 3; // Asteroid Belt + Heavy Fire are survival based
     const survivalDuration = getSurvivalDurationFromStage(currentStage);
 
     let isWaveCleared = false;
@@ -3905,6 +3919,10 @@ export default function App() {
         }
       }
 
+      const followerBulletStride = isCriticalSim ? 3 : isReducedSim ? 2 : 1;
+      const followerAsteroidStride = isCriticalSim ? 2 : isReducedSim ? 2 : 1;
+      const followerEnemyStride = isCriticalSim ? 3 : isReducedSim ? 2 : 1;
+
       tailSegments.current.forEach((seg, i) => {
         // Each pod follows a point in history with a delay
         const delay = (i + 1) * 15;
@@ -3917,7 +3935,8 @@ export default function App() {
         }
 
         // Passive Defense: Collision with enemy bullets
-        enemyBullets.current.forEach(eb => {
+        enemyBullets.current.forEach((eb, ebIdx) => {
+          if (ebIdx % followerBulletStride !== 0) return;
           const bdx = eb.x - seg.x;
           const bdy = eb.y - seg.y;
           const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
@@ -3929,7 +3948,8 @@ export default function App() {
         });
 
         // Passive Defense: Collision with Asteroids
-        asteroids.current.forEach(a => {
+        asteroids.current.forEach((a, aIdx) => {
+          if (aIdx % followerAsteroidStride !== 0) return;
           const adx = a.x - seg.x;
           const ady = a.y - seg.y;
           const adist = Math.sqrt(adx * adx + ady * ady);
@@ -3943,7 +3963,8 @@ export default function App() {
         });
 
         // Active Offense: Collision with Enemies
-        enemies.current.forEach(e => {
+        enemies.current.forEach((e, eIdx) => {
+          if (eIdx % followerEnemyStride !== 0) return;
           if (!e.alive) return;
           const edx = (e.x + e.width / 2) - seg.x;
           const edy = (e.y + e.height / 2) - seg.y;
@@ -5461,7 +5482,7 @@ export default function App() {
     }
 
     // Ambush Warning removed
-    const isTimeBasedStage = currentStage === 2;
+    const isTimeBasedStage = currentStage === 2 || currentStage === 3;
 
     // Final Post-Processing to Main Canvas
     mainCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -5650,6 +5671,7 @@ export default function App() {
     const boundedElapsed = Math.max(1, Math.min(1000, elapsed));
     // Normalize to 60fps (16.67ms per frame)
     dtRef.current = Math.min(2.0, boundedElapsed / (1000 / 60));
+    frameCounterRef.current += 1;
 
     frameTimeSamplesMs.current.push(boundedElapsed);
     fpsSamples.current.push(1000 / boundedElapsed);
@@ -5671,6 +5693,12 @@ export default function App() {
       else if (p95Frame > 36) nextTier = 1;
       else if (p95Frame < 28) nextTier = 0;
       renderLoadTierRef.current = nextTier;
+
+      let nextSimulationTier = simulationLoadTierRef.current;
+      if (p95Frame > 54) nextSimulationTier = 2;
+      else if (p95Frame > 40) nextSimulationTier = 1;
+      else if (p95Frame < 30) nextSimulationTier = 0;
+      simulationLoadTierRef.current = nextSimulationTier;
 
       setPerfStats({
         fpsP50: p50Fps,
@@ -5826,9 +5854,9 @@ export default function App() {
               className="absolute top-4 right-4 flex flex-col items-end gap-1"
             >
               <span className="text-[8px] text-[#00ffcc] font-bold uppercase tracking-widest">
-                {Math.min(5, Math.ceil(wave / 2)) === 2 ? 'Survival_Protocol' : (waveHasBossRef.current ? 'Boss_Progress' : 'Engagement_Progress')}
+                {[2, 3].includes(Math.min(5, Math.ceil(wave / 2))) ? 'Survival_Protocol' : (waveHasBossRef.current ? 'Boss_Progress' : 'Engagement_Progress')}
               </span>
-              {Math.min(5, Math.ceil(wave / 2)) === 2 ? (
+              {[2, 3].includes(Math.min(5, Math.ceil(wave / 2))) ? (
                 <div className="text-2xl font-black italic text-white drop-shadow-[0_0_10px_rgba(0,255,204,0.5)]">
                   {survivalTime}s
                 </div>
