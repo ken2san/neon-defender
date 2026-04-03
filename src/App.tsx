@@ -4095,6 +4095,7 @@ export default function App() {
     const isReducedBossFx = drawLoadTier >= 1;
     const isMinimalBossFx = drawLoadTier >= 2;
     const isChase = currentStage === 4;
+    const isFinalFrontStage = currentStage === 5;
     const isChaseLoadReduced = isChase && drawLoadTier >= 1;  // Skip fancy Chase rendering under load
     stars.current.forEach(s => {
       if (warpFactor.current > 0.1) {
@@ -4116,7 +4117,8 @@ export default function App() {
           s.y = CANVAS_HEIGHT / 2 + Math.sin(spawnAngle) * spawnDist;
         }
 
-        ctx.strokeStyle = `rgba(255, 255, 255, ${s.opacity * warpFactor.current})`;
+        const stageStarAlpha = isFinalFrontStage ? 0.55 : 1;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${s.opacity * warpFactor.current * stageStarAlpha})`;
         ctx.lineWidth = s.size;
         ctx.beginPath();
         ctx.moveTo(s.x, s.y);
@@ -4130,7 +4132,8 @@ export default function App() {
           s.y = -10;
           s.x = Math.random() * CANVAS_WIDTH;
         }
-        ctx.fillStyle = `rgba(255, 255, 255, ${s.opacity})`;
+        const stageStarAlpha = isFinalFrontStage ? 0.55 : 1;
+        ctx.fillStyle = `rgba(255, 255, 255, ${s.opacity * stageStarAlpha})`;
 
         if (isChase && !isChaseLoadReduced) {  // Skip fancy lines under load
           const stretch = 5;
@@ -4153,13 +4156,13 @@ export default function App() {
     const isBossWave = waveRef.current === 6 || waveRef.current === 10;
 
     let baseGridColor = 'rgba(0, 255, 204, 0.05)';
-    if (isBossWave) baseGridColor = 'rgba(255, 51, 102, 0.1)';
-    else if (isBossNear) baseGridColor = 'rgba(255, 204, 0, 0.08)';
+    if (isBossWave) baseGridColor = isFinalFrontStage ? 'rgba(255, 51, 102, 0.05)' : 'rgba(255, 51, 102, 0.1)';
+    else if (isBossNear) baseGridColor = isFinalFrontStage ? 'rgba(255, 204, 0, 0.04)' : 'rgba(255, 204, 0, 0.08)';
 
     const gridColor = isWarping.current ? `rgba(255, 51, 102, ${0.1 + warpFactor.current * 0.3})` : baseGridColor;
     ctx.strokeStyle = gridColor;
     ctx.lineWidth = 1;
-    const gridSpacing = isMobile ? 80 : 40; // Fewer grid lines on mobile
+    const gridSpacing = isFinalFrontStage ? (isMobile ? 96 : 56) : (isMobile ? 80 : 40); // Reduce visual density in Final Front
     const gridSpeed = isWarping.current ? 100 : 20;
     const gridOffset = (Date.now() / gridSpeed) % gridSpacing;
 
@@ -4177,6 +4180,12 @@ export default function App() {
       ctx.moveTo(0, y);
       ctx.lineTo(CANVAS_WIDTH, y);
       ctx.stroke();
+    }
+
+    if (isFinalFrontStage) {
+      // Slightly darken backdrop so collision objects stand out.
+      ctx.fillStyle = 'rgba(2, 6, 18, 0.22)';
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     }
 
     // Draw Trails
@@ -4341,13 +4350,25 @@ export default function App() {
       ctx.translate(obs.x, obs.y);
 
       const color = obs.color;
-      ctx.shadowBlur = 15;
+      ctx.shadowBlur = isFinalFrontStage ? 10 : 15;
       ctx.shadowColor = color;
       ctx.strokeStyle = color;
-      ctx.lineWidth = 3;
+      ctx.lineWidth = isFinalFrontStage ? 4 : 3;
+
+      if (isFinalFrontStage) {
+        ctx.fillStyle = 'rgba(4, 8, 20, 0.55)';
+        ctx.fillRect(-2, -2, obs.width + 4, obs.height + 4);
+      }
 
       // Outer border
       ctx.strokeRect(0, 0, obs.width, obs.height);
+
+      if (isFinalFrontStage) {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(3, 3, obs.width - 6, obs.height - 6);
+        ctx.strokeStyle = color;
+      }
 
       // Inner details based on type
       ctx.lineWidth = 1;
@@ -4400,13 +4421,18 @@ export default function App() {
       ctx.translate(block.x, block.y);
 
       const color = block.color;
-      ctx.shadowBlur = block.type === 'WALL' ? 0 : 15;
+      ctx.shadowBlur = block.type === 'WALL' ? 0 : (isFinalFrontStage ? 9 : 15);
       ctx.shadowColor = color;
       ctx.strokeStyle = color;
       ctx.lineWidth = block.type === 'WALL' ? 1 : 2;
 
+      if (isFinalFrontStage) {
+        ctx.fillStyle = 'rgba(5, 9, 24, 0.55)';
+        ctx.fillRect(-2, -2, block.width + 4, block.height + 4);
+      }
+
       if (block.type === 'WALL') {
-        ctx.fillStyle = 'rgba(26, 26, 46, 0.8)';
+        ctx.fillStyle = isFinalFrontStage ? 'rgba(18, 24, 52, 0.92)' : 'rgba(26, 26, 46, 0.8)';
         ctx.fillRect(0, 0, block.width, block.height);
         ctx.strokeRect(0, 0, block.width, block.height);
       } else if (block.type === 'TENTACLE' && block.segments) {
