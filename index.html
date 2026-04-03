@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>NEON DEFENDER</title>
     <script>
       // --- AI Studio Specific Environment Guard ---
@@ -38,7 +38,7 @@
         window.addEventListener('beforeunload', (event) => {
           console.log("AI Studio Guard: Blocked an attempt to reload or leave the page.");
           event.preventDefault();
-          event.returnValue = 'Blocked Vite auto-reload'; 
+          event.returnValue = 'Blocked Vite auto-reload';
           return 'Blocked Vite auto-reload';
         });
 
@@ -67,4 +67,3 @@
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

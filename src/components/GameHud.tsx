@@ -29,12 +29,12 @@ export default function GameHud({
   stageProgress,
 }: GameHudProps) {
   return (
-    <div className="w-full max-w-150 px-4 mb-3 flex flex-col gap-2 z-100 relative">
-      <div className="w-full flex flex-col gap-1 mb-1">
+    <div className="w-full max-w-150 px-3 md:px-4 mb-2 md:mb-3 flex flex-col gap-1.5 md:gap-2 z-100 relative">
+      <div className="w-full flex flex-col gap-1 mb-0.5 md:mb-1">
         <div className="flex justify-between items-end px-1">
           <div className="flex items-center gap-2">
             <span className="text-[8px] text-gray-500 font-black uppercase tracking-[0.2em]">Pilot Level</span>
-            <span className="text-sm font-black text-[#00ffcc] drop-shadow-[0_0_8px_rgba(0,255,204,0.5)]">{level}</span>
+            <span className="text-xs md:text-sm font-black text-[#00ffcc] drop-shadow-[0_0_8px_rgba(0,255,204,0.5)]">{level}</span>
           </div>
           <span className="text-[7px] text-gray-600 font-bold uppercase tracking-widest">{Math.floor(xp)} / {xpToNextLevel} XP</span>
         </div>
@@ -58,7 +58,7 @@ export default function GameHud({
             <span className="text-[10px] font-black text-[#00ffcc] uppercase tracking-[0.4em]">{sectorName}</span>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-black text-white tracking-tighter leading-none drop-shadow-[0_0_15px_rgba(255,255,255,0.4)]">
+            <span className="text-2xl md:text-3xl font-black text-white tracking-tighter leading-none drop-shadow-[0_0_15px_rgba(255,255,255,0.4)]">
               {score.toLocaleString().padStart(8, '0')}
             </span>
             <span className="text-[8px] text-gray-600 font-bold uppercase tracking-widest">PTS</span>
@@ -101,7 +101,7 @@ export default function GameHud({
           <div className="flex flex-col items-end gap-2">
             <div className="flex items-center gap-3">
               <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Overdrive</span>
-              <div className="w-36 h-3 bg-black/40 rounded-full overflow-hidden border border-white/10 p-px relative transition-all">
+              <div className="w-28 md:w-36 h-2.5 md:h-3 bg-black/40 rounded-full overflow-hidden border border-white/10 p-px relative transition-all">
                 <motion.div
                   animate={overdrive >= maxOverdrive && !isOverdriveActive
                     ? {

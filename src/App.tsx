@@ -55,6 +55,9 @@ const SLINGSHOT_GUARD_COOLDOWN_MS = 1200;
 const SLINGSHOT_GUARD_SMALL_MS = 280;
 const SLINGSHOT_GUARD_LARGE_MS = 450;
 const SLINGSHOT_COMBO_WINDOW_MS = 1200;
+const SLINGSHOT_ATTACK_PREVIEW_THRESHOLD = SLINGSHOT_THRESHOLD + 30;
+const SLINGSHOT_MOBILE_ATTACK_MAX_DISTANCE = 560;
+const SLINGSHOT_MOBILE_ATTACK_DISTANCE_MULTIPLIER = 1.4;
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -177,6 +180,7 @@ export default function App() {
   // Idle-fire: fire slingshot when mousemove stops (finger lifted on trackpad before OS sends mouseup)
   const idleFireTimer = useRef<number | null>(null);
   const slingshotAttackUntil = useRef(0);
+  const slingshotTravelUntil = useRef(0);
   const slingshotGuardUntil = useRef(0);
   const slingshotGuardCooldownUntil = useRef(0);
   const slingshotShieldAngle = useRef(-Math.PI / 2);
@@ -206,6 +210,7 @@ export default function App() {
   const warpStartTime = useRef(0);
   const slingshotTrails = useRef<{x: number, y: number, alpha: number}[]>([]);
   const slingshotTrajectory = useRef<{x1: number, y1: number, x2: number, y2: number, alpha: number} | null>(null);
+  const slingshotLandingTarget = useRef<{x: number, y: number} | null>(null);
   const tailSegments = useRef<TailSegment[]>([]);
   const followerHistory = useRef<{x: number, y: number}[]>([]);
   const isHackedRef = useRef(false);
@@ -578,6 +583,18 @@ export default function App() {
     };
   };
 
+  const getSlingshotLandingDistance = (pullDist: number) => {
+    if (!isMobile) return SLINGSHOT_THRESHOLD;
+
+    const attackDist = Math.max(0, pullDist - SLINGSHOT_ATTACK_PREVIEW_THRESHOLD);
+    if (attackDist <= 0) return SLINGSHOT_THRESHOLD;
+
+    return Math.min(
+      SLINGSHOT_MOBILE_ATTACK_MAX_DISTANCE,
+      380 + attackDist * SLINGSHOT_MOBILE_ATTACK_DISTANCE_MULTIPLIER,
+    );
+  };
+
   const startNextWave = () => {
     resetInputGestureState();
     if (isOverdriveActiveRef.current && pauseStartTime.current > 0) {
@@ -884,6 +901,10 @@ export default function App() {
     const handleTouchStart = (e: TouchEvent) => {
       if (gameState !== 'PLAYING' || showUpgrade) return;
       e.preventDefault();
+      if (idleFireTimer.current !== null) {
+        window.clearTimeout(idleFireTimer.current);
+        idleFireTimer.current = null;
+      }
 
       const now = Date.now();
       const isDoubleTap = now - lastTapTime.current < TOUCH_DOUBLE_TAP_WINDOW_MS;
@@ -996,6 +1017,28 @@ export default function App() {
 
         currentMousePos.current = { x, y };
 
+        // Match web behavior on mobile: once a charged slingshot drag stops moving,
+        // fire it without waiting for touchend so guard cannot be held indefinitely.
+        if (isTouching.current && isSlingshotMode.current && isSlingshotCharged.current) {
+          if (idleFireTimer.current !== null) {
+            window.clearTimeout(idleFireTimer.current);
+          }
+          idleFireTimer.current = window.setTimeout(() => {
+            if (isTouching.current && isSlingshotMode.current && isSlingshotCharged.current) {
+              handleSlingshot();
+              slingshotArmed.current = false;
+              slingshotArmedPos.current = null;
+              isTouching.current = false;
+              keysPressed.current['TouchFire'] = false;
+              mouseAnchorPos.current = null;
+            }
+            idleFireTimer.current = null;
+          }, 80);
+        } else if (idleFireTimer.current !== null) {
+          window.clearTimeout(idleFireTimer.current);
+          idleFireTimer.current = null;
+        }
+
         if (isSlingshotMode.current && mouseAnchorPos.current) {
           // SLINGSHOT MODE: Rubber band logic
           const rawDx = (x - mouseAnchorPos.current.x);
@@ -1054,6 +1097,8 @@ export default function App() {
 
       // CANCEL CHECK: If released very close to anchor, don't fire
       if (inputDist < 25) {
+        slingshotTravelUntil.current = 0;
+        slingshotLandingTarget.current = null;
         isSlingshotCharged.current = false;
         isSlingshotMode.current = false;
         return;
@@ -1075,6 +1120,8 @@ export default function App() {
       // If not charged or not in slingshot mode, just settle
       if (!isSlingshotCharged.current || !isSlingshotMode.current) {
         isSnapping.current = 0;
+        slingshotTravelUntil.current = 0;
+        slingshotLandingTarget.current = null;
         isSlingshotCharged.current = false;
         isSlingshotMode.current = false;
         return;
@@ -1090,6 +1137,8 @@ export default function App() {
       if (isDefenseOnlyRelease) {
         playerVel.current.x = 0;
         playerVel.current.y = 0;
+        slingshotTravelUntil.current = 0;
+        slingshotLandingTarget.current = null;
         targetPos.current.x = playerPos.current.x;
         targetPos.current.y = playerPos.current.y;
         isSnapping.current = 0;
@@ -1106,15 +1155,18 @@ export default function App() {
 
       // Deterministic landing: snap destination is fixed on the threshold ring.
       // This makes the stop point predictable while dragging.
-      const landingCenterX = homeX + dirX * SLINGSHOT_THRESHOLD;
-      const landingCenterY = homeY + dirY * SLINGSHOT_THRESHOLD;
+      const landingDistance = getSlingshotLandingDistance(dist);
+      const landingCenterX = homeX + dirX * landingDistance;
+      const landingCenterY = homeY + dirY * landingDistance;
       targetPos.current = {
         x: Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, landingCenterX - PLAYER_WIDTH / 2)),
         y: Math.max(CANVAS_HEIGHT * 0.1, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, landingCenterY - PLAYER_HEIGHT / 2))
       };
 
       // 1. DEADZONE / ADJUSTMENT MODE (Small pull)
-      if (dist < SLINGSHOT_THRESHOLD + 30) {
+      if (dist < SLINGSHOT_ATTACK_PREVIEW_THRESHOLD) {
+        slingshotTravelUntil.current = 0;
+        slingshotLandingTarget.current = null;
         if (isMobile) {
           if (dist > 20) {
             const pullRatio = Math.min(dist / (SLINGSHOT_THRESHOLD + 30), 1);
@@ -1154,8 +1206,12 @@ export default function App() {
         }
       }
       // 2. ATTACK MODE (Large pull)
-      else if (dist >= SLINGSHOT_THRESHOLD + 30) {
-        const attackDist = dist - (SLINGSHOT_THRESHOLD + 30);
+      else if (dist >= SLINGSHOT_ATTACK_PREVIEW_THRESHOLD) {
+        slingshotLandingTarget.current = {
+          x: targetPos.current.x,
+          y: targetPos.current.y,
+        };
+        const attackDist = dist - SLINGSHOT_ATTACK_PREVIEW_THRESHOLD;
         const tensionRatio = Math.min(attackDist / 350, 3.5);
         const totalPower = Math.pow(tensionRatio, 1.7);
 
@@ -1181,6 +1237,7 @@ export default function App() {
 
         const attackDuration = 500 + (totalPower * 700);
         slingshotAttackUntil.current = Date.now() + attackDuration;
+        slingshotTravelUntil.current = Date.now() + (isMobile ? (230 + totalPower * 120) : attackDuration);
         invulnerableUntil.current = Date.now() + (attackDuration * 0.7);
         tryActivateSlingshotGuard(SLINGSHOT_GUARD_LARGE_MS);
 
@@ -1226,6 +1283,10 @@ export default function App() {
     };
 
     const handleTouchEnd = (e: TouchEvent) => {
+      if (idleFireTimer.current !== null) {
+        window.clearTimeout(idleFireTimer.current);
+        idleFireTimer.current = null;
+      }
       if (isTouching.current) {
         if (isSlingshotMode.current && !isSlingshotCharged.current) {
           // Double-tap released before drag: keep a short armed window for the next touch-drag.
@@ -1753,7 +1814,10 @@ export default function App() {
       // When snapping ends and no finger is down, sync targetPos to current position
       // so the precision lerp doesn't pull the ship back toward the fire-time target.
       if (isMobile && isSnapping.current === 0 && !isDragging) {
-        targetPos.current = { x: playerPos.current.x, y: playerPos.current.y };
+        const isLargePullAttack = Date.now() < slingshotAttackUntil.current;
+        if (!isLargePullAttack) {
+          targetPos.current = { x: playerPos.current.x, y: playerPos.current.y };
+        }
       }
     } else {
       // Very high friction for precision mode to feel responsive
@@ -1765,9 +1829,35 @@ export default function App() {
     if (!isSlingshotMode.current && isSnapping.current <= 0) {
       // Smoothed follow in precision mode to feel more physical and less "teleporty"
       // Guard: skip while isSnapping so slingshot velocity isn't zeroed immediately after firing.
-      const lerpFactor = 0.25 * dt;
-      playerPos.current.x += (targetPos.current.x - playerPos.current.x) * lerpFactor;
-      playerPos.current.y += (targetPos.current.y - playerPos.current.y) * lerpFactor;
+      const remainingAttackMs = slingshotAttackUntil.current - Date.now();
+      const remainingTravelMs = slingshotTravelUntil.current - Date.now();
+      const landingTarget = slingshotLandingTarget.current;
+      const isLargePullAttack = isMobile && landingTarget && remainingTravelMs > 0;
+      if (isLargePullAttack) {
+        const dx = landingTarget.x - playerPos.current.x;
+        const dy = landingTarget.y - playerPos.current.y;
+        const frameMs = dt * (1000 / 60);
+        const progress = Math.min(1, frameMs / Math.max(16, remainingTravelMs));
+        playerPos.current.x += dx * progress;
+        playerPos.current.y += dy * progress;
+
+        if (progress >= 1 || (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5)) {
+          playerPos.current.x = landingTarget.x;
+          playerPos.current.y = landingTarget.y;
+          slingshotTravelUntil.current = 0;
+          slingshotLandingTarget.current = null;
+        }
+      } else {
+        if (landingTarget && remainingTravelMs <= 0) {
+          playerPos.current.x = landingTarget.x;
+          playerPos.current.y = landingTarget.y;
+          slingshotTravelUntil.current = 0;
+          slingshotLandingTarget.current = null;
+        }
+        const lerpFactor = 0.25 * dt;
+        playerPos.current.x += (targetPos.current.x - playerPos.current.x) * lerpFactor;
+        playerPos.current.y += (targetPos.current.y - playerPos.current.y) * lerpFactor;
+      }
       playerVel.current = { x: 0, y: 0 };
     } else if (isSlingshotMode.current && !isDragging) {
       // Active slingshot drag released but mode still active: pull toward targetPos
@@ -5014,12 +5104,13 @@ export default function App() {
               ctx.restore();
             } else {
               // Predicted landing point on the threshold ring (release stop position)
-              if (dist > 5) {
+              if (dist >= SLINGSHOT_ATTACK_PREVIEW_THRESHOLD) {
                 const pullMag = Math.sqrt(dx * dx + dy * dy) || 1;
                 const pullDirX = -dx / pullMag;
                 const pullDirY = -dy / pullMag;
-                const predictedCenterX = sCenterX + pullDirX * SLINGSHOT_THRESHOLD;
-                const predictedCenterY = sCenterY + pullDirY * SLINGSHOT_THRESHOLD;
+                const landingDistance = getSlingshotLandingDistance(dist);
+                const predictedCenterX = sCenterX + pullDirX * landingDistance;
+                const predictedCenterY = sCenterY + pullDirY * landingDistance;
 
                 ctx.beginPath();
                 ctx.arc(predictedCenterX, predictedCenterY, 10, 0, Math.PI * 2);
@@ -5373,7 +5464,13 @@ export default function App() {
   }, [score]);
 
   return (
-    <div className="min-h-screen bg-[#020205] text-white flex flex-col items-center justify-center font-mono overflow-hidden">
+    <div
+      className="min-h-dvh w-full bg-[#020205] text-white flex flex-col items-center justify-between md:justify-center font-mono overflow-x-hidden overflow-y-visible md:overflow-hidden"
+      style={{
+        paddingTop: isMobile ? 'max(8px, env(safe-area-inset-top))' : undefined,
+        paddingBottom: isMobile ? 'max(8px, env(safe-area-inset-bottom))' : undefined,
+      }}
+    >
       <GameHud
         level={level}
         xp={xp}
@@ -5389,7 +5486,9 @@ export default function App() {
       />
 
       {/* Game Canvas Container with Ambient Glow and Scanlines */}
-      <div className="relative border-4 md:border-8 border-[#1a1a2e] rounded-xl shadow-[0_0_80px_rgba(0,255,204,0.15)] overflow-hidden max-w-[95vw] max-h-[70vh] aspect-3/4 group">
+      <div
+        className="relative border-4 md:border-8 border-[#1a1a2e] rounded-xl shadow-[0_0_80px_rgba(0,255,204,0.15)] overflow-hidden max-w-[95vw] max-h-[70vh] aspect-3/4 group"
+      >
         {/* Ambient Glow behind canvas */}
         <div className="absolute inset-0 bg-[#00ffcc]/5 blur-3xl rounded-full opacity-30 group-hover:opacity-60 transition-opacity duration-1000 -z-10" />
 
@@ -5788,16 +5887,16 @@ export default function App() {
       </div>
 
       {/* Footer & Fullscreen */}
-      <div className="mt-8 text-[9px] text-gray-700 uppercase tracking-[0.5em] flex items-center gap-4">
-        <span>Arcade Revision 2.5</span>
-        <span className="w-1 h-1 bg-gray-800 rounded-full" />
-        <button
-          onClick={toggleFullscreen}
-          className="hover:text-white transition-colors flex items-center gap-1"
-        >
-          <Maximize2 size={10} />
-          <span>{isFullscreen ? "Exit Full" : "Fullscreen"}</span>
-        </button>
+      <div className="mt-2 md:mt-8 text-[9px] text-gray-700 uppercase tracking-[0.5em] flex items-center gap-4">
+          <span>Arcade Revision 2.5</span>
+          <span className="w-1 h-1 bg-gray-800 rounded-full" />
+          <button
+            onClick={toggleFullscreen}
+            className="hover:text-white transition-colors flex items-center gap-1"
+          >
+            <Maximize2 size={10} />
+            <span>{isFullscreen ? "Exit Full" : "Fullscreen"}</span>
+          </button>
       </div>
     </div>
   );
