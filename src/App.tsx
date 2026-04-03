@@ -3169,6 +3169,15 @@ export default function App() {
           // This allows the separation force from the previous frame to persist.
           enemy.x += (p2.x - p1.x);
           enemy.y += (p2.y - p1.y);
+
+          // Fail-safe: if loop dive takes too long, force a return to formation.
+          // Prevents off-screen looping enemies from stalling wave flow.
+          if (t > loopDuration + 70) {
+            enemy.isDiving = false;
+            enemy.isReturning = true;
+            enemy.state = 'RETURNING';
+            enemy.diveTime = 0;
+          }
         } else if (enemy.diveType === 'chase') {
           // Under reduced sim, use stride sampling for chase enemies (skip sqrt every frame)
           const chaseEnemyStride = isCriticalSim ? 4 : isReducedSim ? 2 : 1;
@@ -3843,9 +3852,18 @@ export default function App() {
         stageStartTime.current = 0;
       }
 
-      // Keep spawning enemies if they are low
+      // Keep spawning enemies if visible threats are low.
+      // Off-screen looping enemies should not block fresh spawns.
       const maxEnemies = isAsteroidBelt ? (isMobile ? 4 : 5) : 8;
-      if (enemies.current.filter(e => e.alive).length < maxEnemies && !isWarping.current) {
+      const visibleEnemyCount = enemies.current.filter((e) =>
+        e.alive &&
+        !e.isBoss &&
+        e.x > -80 &&
+        e.x < CANVAS_WIDTH + 80 &&
+        e.y > -120 &&
+        e.y < CANVAS_HEIGHT + 120
+      ).length;
+      if (visibleEnemyCount < maxEnemies && !isWarping.current) {
         const x = 40 + Math.random() * (CANVAS_WIDTH - 80);
         const eliteChance = isAsteroidBelt
           ? Math.min(0.18, 0.08 + (waveRef.current * 0.01))
@@ -5694,6 +5712,7 @@ export default function App() {
 
     if (now - lastPerfUiUpdateAt.current >= 500) {
       lastPerfUiUpdateAt.current = now;
+      const currentStage = getStageFromWave(waveRef.current);
       const aliveEnemies = enemies.current.reduce((count, enemy) => count + (enemy.alive ? 1 : 0), 0);
       const p50Fps = getPercentile(fpsSamples.current, 50);
       const p95Fps = getPercentile(fpsSamples.current, 95);
