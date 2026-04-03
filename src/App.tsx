@@ -2960,6 +2960,7 @@ export default function App() {
           } else if (enemy.bossType === BossType.TENTACLE) {
             // Tentacle Boss logic
             const time = currentTime / 1000;
+            const tentacleCollisionStride = renderLoadTierRef.current === 2 ? 3 : renderLoadTierRef.current === 1 ? 2 : 1;
             enemy.x = CANVAS_WIDTH / 2 - enemy.width / 2 + Math.sin(time * 0.5) * 120;
             enemy.y = 100 + Math.cos(time * 0.3) * 40;
 
@@ -2981,11 +2982,12 @@ export default function App() {
                   seg.y = prevY + Math.sin(seg.angle) * segLen;
 
                   // Collision with player
-                  const pdx = (playerPos.current.x + PLAYER_WIDTH / 2) - seg.x;
-                  const pdy = (playerPos.current.y + PLAYER_HEIGHT / 2) - seg.y;
-                  const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
-                  if (pdist < 20 && invulnerableUntil.current < currentTime) {
-                    handlePlayerHit();
+                  if (sIdx % tentacleCollisionStride === 0) {
+                    const pdx = (playerPos.current.x + PLAYER_WIDTH / 2) - seg.x;
+                    const pdy = (playerPos.current.y + PLAYER_HEIGHT / 2) - seg.y;
+                    if ((pdx * pdx + pdy * pdy) < 400 && invulnerableUntil.current < currentTime) {
+                      handlePlayerHit();
+                    }
                   }
 
                   prevX = seg.x;
@@ -4037,6 +4039,10 @@ export default function App() {
 
     // Parallax Starfield
     const currentStage = getStageFromWave(waveRef.current);
+    const drawNow = Date.now();
+    const drawLoadTier = renderLoadTierRef.current;
+    const isReducedBossFx = drawLoadTier >= 1;
+    const isMinimalBossFx = drawLoadTier >= 2;
     const isChase = currentStage === 4;
     stars.current.forEach(s => {
       if (warpFactor.current > 0.1) {
@@ -4767,8 +4773,8 @@ export default function App() {
       if (enemy.isBoss) {
         // Boss Rendering
         const color = enemy.bossType === BossType.LASER ? '#00ffcc' : '#ff3366';
-        const pulse = Math.sin(Date.now() / 150) * 10;
-        ctx.shadowBlur = 15;
+        const pulse = Math.sin(drawNow / 150) * 10;
+        ctx.shadowBlur = isMinimalBossFx ? 7 : isReducedBossFx ? 11 : 15;
         ctx.shadowColor = color;
         ctx.strokeStyle = color;
         ctx.lineWidth = 4;
@@ -4813,8 +4819,9 @@ export default function App() {
           ctx.stroke();
 
           // Rotating Rings
-          const angleOffset = (Date.now() / 1000) * Math.PI;
-          for (let i = 0; i < 3; i++) {
+          const angleOffset = (drawNow / 1000) * Math.PI;
+          const ringCount = isMinimalBossFx ? 1 : isReducedBossFx ? 2 : 3;
+          for (let i = 0; i < ringCount; i++) {
             ctx.save();
             ctx.rotate(angleOffset * (i + 1) * 0.5);
             ctx.lineWidth = 2;
@@ -4827,11 +4834,11 @@ export default function App() {
           // Draw Lasers
           if (enemy.phase! >= 1) {
             const angle = (enemy.tractorBeamTimer! / 1000) * Math.PI;
-            const laserCount = enemy.phase === 3 ? 4 : 2;
+            const laserCount = isMinimalBossFx ? 2 : enemy.phase === 3 ? 4 : 2;
             ctx.save();
-            ctx.lineWidth = 10 + Math.sin(Date.now() / 50) * 5;
+            ctx.lineWidth = (isMinimalBossFx ? 7 : 10) + Math.sin(drawNow / 50) * (isMinimalBossFx ? 3 : 5);
             ctx.strokeStyle = '#00ffff';
-            ctx.shadowBlur = 30;
+            ctx.shadowBlur = isMinimalBossFx ? 14 : 30;
             ctx.shadowColor = '#00ffff';
             for (let i = 0; i < laserCount; i++) {
               const laserAngle = angle + (i * Math.PI * 2 / laserCount);
@@ -4861,7 +4868,7 @@ export default function App() {
         if (enemy.bossType === BossType.TRACTOR && (enemy.isTractorBeaming || (enemy.tractorBeamTimer! > 2500))) {
           ctx.save();
           const isCharging = enemy.tractorBeamTimer! > 2500 && !enemy.isTractorBeaming;
-          const beamWidth = isCharging ? 4 : 120 + Math.sin(Date.now() / 50) * 20;
+          const beamWidth = isCharging ? 4 : 120 + Math.sin(drawNow / 50) * 20;
           const beamAlpha = isCharging ? 0.3 : 0.8;
 
           const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
@@ -4879,11 +4886,11 @@ export default function App() {
           ctx.closePath();
           ctx.fill();
 
-          if (!isCharging) {
+          if (!isCharging && !isMinimalBossFx) {
             // Add some scanning lines inside the beam
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
             ctx.lineWidth = 2;
-            const scanY = (Date.now() % 1000) / 1000 * CANVAS_HEIGHT;
+            const scanY = (drawNow % 1000) / 1000 * CANVAS_HEIGHT;
             ctx.beginPath();
             ctx.moveTo(-beamWidth / 2 * (scanY / CANVAS_HEIGHT), scanY);
             ctx.lineTo(beamWidth / 2 * (scanY / CANVAS_HEIGHT), scanY);
@@ -4917,21 +4924,37 @@ export default function App() {
 
         // Rotating Core
         ctx.save();
-        ctx.rotate(Date.now() / 500);
+        ctx.rotate(drawNow / 500);
         ctx.strokeRect(-8, -8, 16, 16);
         ctx.restore();
 
         // Draw Tentacles in world space
         if (enemy.bossType === BossType.TENTACLE && enemy.tentacles) {
           ctx.restore(); // Restore boss translate
-          const time = Date.now() / 1000;
+          const time = drawNow / 1000;
 
           enemy.tentacles.forEach((t, tIdx) => {
             const hue = (time * 50 + tIdx * 60) % 360;
             const color = `hsla(${hue}, 80%, 60%, 1)`;
             const glowColor = `hsla(${hue}, 80%, 60%, 0.4)`;
 
-            t.segments.forEach((seg, i) => {
+            if (isMinimalBossFx) {
+              ctx.save();
+              ctx.strokeStyle = color;
+              ctx.lineWidth = 3;
+              ctx.shadowBlur = 6;
+              ctx.shadowColor = glowColor;
+              ctx.beginPath();
+              t.segments.forEach((seg, i) => {
+                if (i === 0) ctx.moveTo(seg.x, seg.y);
+                else ctx.lineTo(seg.x, seg.y);
+              });
+              ctx.stroke();
+              ctx.restore();
+            } else {
+              const segmentStride = isReducedBossFx ? 2 : 1;
+              t.segments.forEach((seg, i) => {
+                if (i % segmentStride !== 0) return;
               ctx.save();
               ctx.translate(seg.x, seg.y);
               ctx.rotate(seg.angle);
@@ -4963,14 +4986,15 @@ export default function App() {
               }
 
               ctx.restore();
-            });
+              });
+            }
 
             // Tip effect
             const tip = t.segments[t.segments.length - 1];
             ctx.save();
             ctx.translate(tip.x, tip.y);
             ctx.fillStyle = '#ffffff';
-            ctx.shadowBlur = 20;
+            ctx.shadowBlur = isMinimalBossFx ? 10 : 20;
             ctx.shadowColor = '#ffffff';
             ctx.beginPath();
             ctx.arc(0, 0, 5 + Math.sin(time * 10) * 3, 0, Math.PI * 2);
@@ -4983,7 +5007,7 @@ export default function App() {
           ctx.translate(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
           const coreHue = (time * 100) % 360;
           ctx.fillStyle = `hsla(${coreHue}, 90%, 50%, 1)`;
-          ctx.shadowBlur = 30;
+          ctx.shadowBlur = isMinimalBossFx ? 14 : 30;
           ctx.shadowColor = `hsla(${coreHue}, 90%, 50%, 0.8)`;
           ctx.beginPath();
           ctx.arc(0, 0, 30 + Math.sin(time * 8) * 5, 0, Math.PI * 2);
