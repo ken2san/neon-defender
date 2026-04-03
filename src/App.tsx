@@ -40,6 +40,9 @@ const TOUCH_SLINGSHOT_RESISTANCE = 0.3;
 const TOUCH_INPUT_VELOCITY_SMOOTHING = 0.55;
 const INPUT_WATCHDOG_RELEASE_MS = 280;
 const INPUT_WATCHDOG_HARD_RELEASE_MS = 1200;
+const INPUT_DEBUG_LOG_PARAM = 'inputDebug';
+const INPUT_DEBUG_STORAGE_KEY = 'neon:input-debug-log';
+const INPUT_DEBUG_MIN_LOG_INTERVAL_MS = 120;
 
 const VFX_PARTICLE_DESKTOP_MULTIPLIER = 0.75;
 const VFX_PARTICLE_MOBILE_MULTIPLIER = 0.18;
@@ -212,6 +215,9 @@ export default function App() {
   const isVirtualDragActive = useRef(false);
   const virtualDragReleaseTimer = useRef<number | null>(null);
   const lastInputActivityAt = useRef(0);
+  const inputDebugLogEnabledRef = useRef(false);
+  const lastInputDebugLogAtRef = useRef(0);
+  const lastInputDebugSnapshotRef = useRef('');
   // Idle-fire: fire slingshot when mousemove stops (finger lifted on trackpad before OS sends mouseup)
   const idleFireTimer = useRef<number | null>(null);
   const slingshotAttackUntil = useRef(0);
@@ -843,6 +849,59 @@ export default function App() {
     });
   };
 
+  const getInputDebugSnapshot = () => ({
+    mouse: isMouseDown.current ? 1 : 0,
+    touch: isTouching.current ? 1 : 0,
+    touchPointCount: Object.keys(touchPoints.current).length,
+    virtual: isVirtualDragActive.current ? 1 : 0,
+    sling: isSlingshotMode.current ? 1 : 0,
+    charged: isSlingshotCharged.current ? 1 : 0,
+    armed: slingshotArmed.current ? 1 : 0,
+    anchor: mouseAnchorPos.current ? 1 : 0,
+    idleMs: lastInputActivityAt.current > 0 ? Math.max(0, Date.now() - lastInputActivityAt.current) : -1,
+  });
+
+  const logInputDebug = (event: string, details: Record<string, unknown> = {}) => {
+    if (!inputDebugLogEnabledRef.current) return;
+
+    const now = Date.now();
+    if (event === 'state-change' && now - lastInputDebugLogAtRef.current < INPUT_DEBUG_MIN_LOG_INTERVAL_MS) {
+      return;
+    }
+
+    const snapshot = getInputDebugSnapshot();
+    console.info('[NEON][InputDebug]', {
+      event,
+      ts: new Date(now).toISOString(),
+      gameState,
+      wave: waveRef.current,
+      stage: getStageFromWave(waveRef.current),
+      ...snapshot,
+      ...details,
+    });
+
+    if (event === 'state-change') {
+      lastInputDebugLogAtRef.current = now;
+    }
+  };
+
+  const logTouchDebug = (event: string, touchCount: number, details: Record<string, unknown> = {}) => {
+    if (!inputDebugLogEnabledRef.current) return;
+
+    const snapshot = getInputDebugSnapshot();
+    console.info('[NEON][TouchDebug]', {
+      event,
+      ts: new Date().toISOString(),
+      touchCount,
+      gameState,
+      wave: waveRef.current,
+      stage: getStageFromWave(waveRef.current),
+      ...snapshot,
+      ...details,
+    });
+    lastInputDebugLogAtRef.current = now;
+  };
+
   const startGame = () => {
     audio.init();
     audio.playBGM(1);
@@ -905,9 +964,35 @@ export default function App() {
     waveHasBossRef.current = enemies.current.some(e => e.alive && e.isBoss);
     wavePeakAliveRef.current = Math.max(1, enemies.current.filter(e => e.alive).length);
     setStageProgress(0);
+    lastInputDebugSnapshotRef.current = '';
+    logInputDebug('game-start', {
+      source: 'startGame',
+      userAgent: navigator.userAgent,
+    });
     audio.playStageStart();
     setGameState('PLAYING');
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const param = params.get(INPUT_DEBUG_LOG_PARAM);
+
+    if (param === '1') {
+      window.localStorage.setItem(INPUT_DEBUG_STORAGE_KEY, '1');
+    } else if (param === '0') {
+      window.localStorage.removeItem(INPUT_DEBUG_STORAGE_KEY);
+    }
+
+    const enabled = param === '1' || window.localStorage.getItem(INPUT_DEBUG_STORAGE_KEY) === '1';
+    inputDebugLogEnabledRef.current = enabled;
+
+    if (enabled) {
+      console.info('[NEON][InputDebug] enabled. Disable with ?inputDebug=0');
+      logInputDebug('logging-enabled', {
+        source: param === '1' ? 'query' : 'storage',
+      });
+    }
+  }, []);
 
   // Input handling
   useEffect(() => {
@@ -1014,6 +1099,12 @@ export default function App() {
         idleFireTimer.current = null;
       }
 
+      const touchCount = e.touches.length;
+      logTouchDebug('touchstart', touchCount, {
+        totalTouches: e.touches.length,
+        changedCount: e.changedTouches.length,
+      });
+
       const now = Date.now();
       const isDoubleTap = now - lastTapTime.current < TOUCH_DOUBLE_TAP_WINDOW_MS;
       lastTapTime.current = now;
@@ -1112,6 +1203,18 @@ export default function App() {
         canvasScaleRef.current = rect.height / CANVAS_HEIGHT;
         const x = ((touch.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
         const y = ((touch.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
+
+        // Debug: log multi-touch warnings
+        if (e.touches.length > 1 && !inputDebugLogEnabledRef.current) {
+          // Silently track for anomaly detection
+        } else if (e.touches.length > 1) {
+          logTouchDebug('touchmove-multitouch', e.touches.length, {
+            primaryX: Math.round(x),
+            primaryY: Math.round(y),
+            targetX: Math.round(targetPos.current.x),
+            targetY: Math.round(targetPos.current.y),
+          });
+        }
 
         // Track input velocity with smoothing
         const now = Date.now();
@@ -1212,6 +1315,9 @@ export default function App() {
 
       // CANCEL CHECK: If released very close to anchor, don't fire
       if (inputDist < 25) {
+        logInputDebug('slingshot-cancel', {
+          inputDist: Math.round(inputDist),
+        });
         slingshotTravelUntil.current = 0;
         slingshotLandingTarget.current = null;
         isSlingshotCharged.current = false;
@@ -1250,6 +1356,9 @@ export default function App() {
       };
 
       if (isDefenseOnlyRelease) {
+        logInputDebug('slingshot-defense-release', {
+          inputDist: Math.round(inputDist),
+        });
         playerVel.current.x = 0;
         playerVel.current.y = 0;
         slingshotTravelUntil.current = 0;
@@ -1350,6 +1459,13 @@ export default function App() {
         playerVel.current.x = finalVelX;
         playerVel.current.y = finalVelY;
 
+        logInputDebug('slingshot-attack-release', {
+          pullDist: Math.round(dist),
+          inputSpeed: Math.round(inputSpeed),
+          power: Number(totalPower.toFixed(2)),
+          speed: Math.round(Math.sqrt(finalVelX * finalVelX + finalVelY * finalVelY)),
+        });
+
         const attackDuration = 500 + (totalPower * 700);
         slingshotAttackUntil.current = Date.now() + attackDuration;
         slingshotTravelUntil.current = Date.now() + (isMobile ? (230 + totalPower * 120) : attackDuration);
@@ -1398,6 +1514,12 @@ export default function App() {
     };
 
     const handleTouchEnd = (e: TouchEvent) => {
+      const remainingTouchCount = e.touches.length;
+      logTouchDebug('touchend', remainingTouchCount, {
+        changedCount: e.changedTouches.length,
+        isTouchingNow: isTouching.current,
+      });
+
       markInputActivity();
       if (idleFireTimer.current !== null) {
         window.clearTimeout(idleFireTimer.current);
@@ -1419,6 +1541,14 @@ export default function App() {
       if (e.touches.length === 0) {
         isTouching.current = false;
         keysPressed.current['TouchFire'] = false;
+        logTouchDebug('touchend-all-released', 0, {
+          isTouchingAfter: isTouching.current,
+        });
+      } else {
+        // Multi-touch: some fingers still down
+        logTouchDebug('touchend-partial', e.touches.length, {
+          remainingFingers: e.touches.length,
+        });
       }
     };
 
@@ -1756,7 +1886,26 @@ export default function App() {
         keysPressed.current['TouchFire'] = false;
         inputVel.current = { x: 0, y: 0 };
         inputHistory.current = [];
+        logInputDebug('watchdog-reset', {
+          idleMs,
+          staleVirtualDrag,
+          staleMouseDrag,
+        });
       }
+    }
+
+    const inputSnapshotKey = [
+      isMouseDown.current ? 1 : 0,
+      isTouching.current ? 1 : 0,
+      isVirtualDragActive.current ? 1 : 0,
+      isSlingshotMode.current ? 1 : 0,
+      isSlingshotCharged.current ? 1 : 0,
+      slingshotArmed.current ? 1 : 0,
+      mouseAnchorPos.current ? 1 : 0,
+    ].join('|');
+    if (inputSnapshotKey !== lastInputDebugSnapshotRef.current) {
+      lastInputDebugSnapshotRef.current = inputSnapshotKey;
+      logInputDebug('state-change');
     }
 
     // Keep object counts within a soft budget when frame time worsens.
