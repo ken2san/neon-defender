@@ -1,6 +1,7 @@
 type InputHandlers = {
   onKeyDown: (event: KeyboardEvent) => void;
   onKeyUp: (event: KeyboardEvent) => void;
+  onPointerDown: (event: PointerEvent) => void;
   onMouseDown: (event: MouseEvent) => void;
   onMouseMove: (event: MouseEvent) => void;
   onMouseUp: () => void;
@@ -13,6 +14,7 @@ type InputHandlers = {
 export const bindInputListeners = ({
   onKeyDown,
   onKeyUp,
+  onPointerDown,
   onMouseDown,
   onMouseMove,
   onMouseUp,
@@ -25,6 +27,7 @@ export const bindInputListeners = ({
 
   window.addEventListener('keydown', onKeyDown, { passive: false });
   window.addEventListener('keyup', onKeyUp, { passive: false });
+  window.addEventListener('pointerdown', onPointerDown);
   window.addEventListener('mousedown', onMouseDown);
   window.addEventListener('mousemove', onMouseMove);
   window.addEventListener('mouseup', onMouseUp);
@@ -40,6 +43,7 @@ export const bindInputListeners = ({
   return () => {
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
+    window.removeEventListener('pointerdown', onPointerDown);
     window.removeEventListener('mousedown', onMouseDown);
     window.removeEventListener('mousemove', onMouseMove);
     window.removeEventListener('mouseup', onMouseUp);

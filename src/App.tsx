@@ -24,7 +24,7 @@ import StageTitleOverlay from './components/StageTitleOverlay';
 import { buildWaveEnemies, createEnemy } from './game/enemies';
 import { bindInputListeners } from './hooks/useInput';
 import { LEVEL_UP_OPTIONS, RELIC_LABELS, RELIC_OPTIONS, UpgradeOption, pickRandomOptions } from './game/upgrades';
-import { getStageFromWave, getStageLabelFromWave, getSurvivalDurationFromStage } from './game/stage';
+import { getStageFromWave, getStageLabelFromWave, getSurvivalDurationFromStage, isSurvivalStage } from './game/stage';
 import { XP_PER_SCRAP, applyXpGain } from './game/progression';
 
 const getPercentile = (values: number[], percentile: number): number => {
@@ -65,6 +65,19 @@ const SLINGSHOT_GUARD_SMALL_MS = 280;
 const SLINGSHOT_GUARD_LARGE_MS = 450;
 const SLINGSHOT_COMBO_WINDOW_MS = 1200;
 const SLINGSHOT_ATTACK_PREVIEW_THRESHOLD = SLINGSHOT_THRESHOLD + 30;
+const AUTO_SPACE_COOLDOWN_MS = 1500;
+const AUTO_SPACE_HARD_ENEMY_RADIUS = 210;
+const AUTO_SPACE_BULLET_RADIUS = 240;
+const AUTO_SPACE_MIN_HARD_ENEMIES = 4;
+const AUTO_SPACE_MIN_BULLETS = 7;
+const AUTO_SPACE_ENEMY_PUSH = 64;
+const AUTO_SPACE_BULLET_CLEAR_MAX = 8;
+const TENTACLE_SHIELD_DEFLECT_COOLDOWN_MS = 110;
+const TENTACLE_SHIELD_DEFLECT_STUN_MS = 140;
+const TENTACLE_SHIELD_DEFLECT_KNOCKBACK = 5;
+const RAIN_TENTACLE_DEFLECT_COOLDOWN_MS = 140;
+const RAIN_TENTACLE_DEFLECT_PUSH = 56;
+const RAIN_TENTACLE_DEFLECT_LIFT = 22;
 // Slingshot tier thresholds and landing distances expressed in screen pixels.
 // getSlingshotLandingDistance converts to/from canvas pixels using canvasScaleRef,
 // so the physical finger effort and visual jump feel the same on any screen size.
@@ -254,6 +267,9 @@ export default function App() {
   const wavePeakAliveRef = useRef(1);
   const waveHasBossRef = useRef(false);
   const lastProgressUiUpdateAt = useRef(0);
+  const lastAutoSpaceAt = useRef(0);
+  const lastTentacleShieldDeflectAt = useRef(0);
+  const lastRainTentacleDeflectAt = useRef(0);
   const blocks = useRef<Obstacle[]>([]);
   const lastBlockRowY = useRef(0);
 
@@ -932,6 +948,53 @@ export default function App() {
       keysPressed.current[e.code] = false;
     };
 
+    const handlePointerDown = (e: PointerEvent) => {
+      if (gameState !== 'PLAYING' || showUpgrade) return;
+      if (e.pointerType !== 'mouse' || e.button !== 0) return;
+
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      canvasScaleRef.current = rect.height / CANVAS_HEIGHT;
+      const x = ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
+      const y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
+      currentMousePos.current = { x, y };
+
+      const now = Date.now();
+      const isPointerDoubleTap = now - lastPointerTapTime.current < TOUCH_DOUBLE_TAP_WINDOW_MS;
+      lastPointerTapTime.current = now;
+
+      if (pointerTapTimer.current !== null) {
+        window.clearTimeout(pointerTapTimer.current);
+      }
+
+      // Some macOS multi-finger gestures emit pointerdown but swallow mousedown.
+      // If that happens, promote this into a short-lived virtual drag so movement remains responsive.
+      pointerTapTimer.current = window.setTimeout(() => {
+        pointerTapTimer.current = null;
+        if (isMouseDown.current || isTouching.current || showUpgrade || gameState !== 'PLAYING') return;
+
+        isMouseDown.current = true;
+        isVirtualDragActive.current = true;
+        playerStartPos.current = { x: playerPos.current.x, y: playerPos.current.y };
+        mouseAnchorPos.current = { x, y };
+        inputHistory.current = [{ x, y, t: now }];
+
+        if (isPointerDoubleTap || keysPressed.current['ControlLeft'] || keysPressed.current['ControlRight']) {
+          isSlingshotMode.current = true;
+          isSlingshotCharged.current = false;
+          audio.playSlingshot?.();
+          shake.current = Math.max(shake.current, 5);
+          createExplosion(x, y, '#00ffcc', 20);
+          timeScale.current = 0.2;
+          setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 100);
+        } else {
+          isSlingshotMode.current = false;
+          isSlingshotCharged.current = false;
+        }
+      }, 24);
+    };
+
     const handleTouchStart = (e: TouchEvent) => {
       if (gameState !== 'PLAYING' || showUpgrade) return;
       e.preventDefault();
@@ -1009,14 +1072,18 @@ export default function App() {
       // Short timer: covers the case where mouseup is not fired by OS (Mac 3-finger drag)
       // 40ms is nearly imperceptible but prevents false-release during fast movement
       virtualDragReleaseTimer.current = window.setTimeout(() => {
-        if (!isVirtualDragActive.current || !isSlingshotMode.current) return;
-        if (!isSlingshotCharged.current) {
-          armSlingshotAtCurrentPos();
-        } else {
-          handleSlingshot();
-          slingshotArmed.current = false;
-          slingshotArmedPos.current = null;
+        if (!isVirtualDragActive.current) return;
+
+        if (isSlingshotMode.current) {
+          if (!isSlingshotCharged.current) {
+            armSlingshotAtCurrentPos();
+          } else {
+            handleSlingshot();
+            slingshotArmed.current = false;
+            slingshotArmedPos.current = null;
+          }
         }
+
         isVirtualDragActive.current = false;
         isMouseDown.current = false;
         mouseAnchorPos.current = null;
@@ -1409,7 +1476,7 @@ export default function App() {
 
       // Web/trackpad safety: if mouseup was swallowed by gesture handling,
       // force-release stale drag state when no button is currently pressed.
-      if (isMouseDown.current && e.buttons === 0 && !isTouching.current) {
+      if (isMouseDown.current && !isVirtualDragActive.current && e.buttons === 0 && !isTouching.current) {
         handleMouseUp();
       }
 
@@ -1547,6 +1614,7 @@ export default function App() {
     const unbindInputListeners = bindInputListeners({
       onKeyDown: handleKeyDown,
       onKeyUp: handleKeyUp,
+      onPointerDown: handlePointerDown,
       onMouseDown: handleMouseDown,
       onMouseMove: handleMouseMove,
       onMouseUp: handleMouseUp,
@@ -2117,10 +2185,10 @@ export default function App() {
     const playerCenterX = playerPos.current.x + PLAYER_WIDTH / 2;
     const playerCenterY = playerPos.current.y + PLAYER_HEIGHT / 2;
     const emitSlingshotShieldImpact = (x: number, y: number, intensity = 1) => {
-      if (frameNow - slingshotShieldFxAt.current < 45) return;
+      if (frameNow - slingshotShieldFxAt.current < 90) return;
       slingshotShieldFxAt.current = frameNow;
-      createExplosion(x, y, '#00ffcc', Math.max(4, Math.round(4 + intensity * 3)));
-      shake.current = Math.max(shake.current, 2 + intensity * 2);
+      createExplosion(x, y, '#00ffcc', Math.max(2, Math.round(2 + intensity * 2)));
+      shake.current = Math.max(shake.current, 1.5 + intensity * 1.5);
     };
     const doesShieldCatchPoint = (x: number, y: number, padding = 0) => {
       if (!shieldState.active) return false;
@@ -2266,6 +2334,38 @@ export default function App() {
       setOverdrive(overdriveGauge.current);
       onHit();
     };
+    const applyShieldRainTentacleDeflect = (
+      block: Obstacle,
+      collision: { centerX: number; centerY: number; dx: number; dy: number; dist: number },
+      impact: number,
+      overdriveCost: number,
+    ) => {
+      if (frameNow - lastRainTentacleDeflectAt.current < RAIN_TENTACLE_DEFLECT_COOLDOWN_MS) return;
+      lastRainTentacleDeflectAt.current = frameNow;
+
+      const pushX = (collision.dx / collision.dist) * RAIN_TENTACLE_DEFLECT_PUSH;
+      const nextX = Math.max(24, Math.min(CANVAS_WIDTH - block.width - 24, block.x + pushX));
+      block.x = nextX;
+      if (block.baseX !== undefined) {
+        block.baseX = Math.max(24, Math.min(CANVAS_WIDTH - block.width - 24, block.baseX + pushX));
+      }
+
+      // Lift tentacle slightly so the player gets an immediate recovery lane.
+      block.y -= RAIN_TENTACLE_DEFLECT_LIFT;
+
+      if (block.segments) {
+        const nudge = (collision.dx / collision.dist) * 12;
+        block.segments.forEach((seg, idx) => {
+          seg.x += nudge * (1 - idx * 0.06);
+          seg.angle += (collision.dx / collision.dist) * 0.22;
+        });
+      }
+
+      emitSlingshotShieldImpact(collision.centerX, collision.centerY, impact);
+      overdriveGauge.current = Math.max(0, overdriveGauge.current - overdriveCost);
+      setOverdrive(overdriveGauge.current);
+      isSnapping.current = Math.max(isSnapping.current, 5);
+    };
 
     // Maze Generation (Canyon)
     const scrollSpeed = 3 * worldSpeedScale;
@@ -2296,6 +2396,20 @@ export default function App() {
         playerPos.current.y + PLAYER_HEIGHT > block.y
       );
       const blockImpact = overlapsPlayer ? getObstacleImpact(block.x, block.y, block.width, block.height) : null;
+      const tentacleShieldCollision = (block.type === 'TENTACLE' && block.segments)
+        ? block.segments
+          .map((seg) => {
+            const centerX = block.x + seg.x;
+            const centerY = block.y + seg.y;
+            const caught = doesShieldCatchPoint(centerX, centerY, 10);
+            if (!caught) return null;
+            const dx = playerCenterX - centerX;
+            const dy = playerCenterY - centerY;
+            const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+            return { centerX, centerY, dx, dy, dist };
+          })
+          .find((collision) => collision !== null)
+        : null;
 
       if (block.hp > 0 && isSlingshotAttacking && blockImpact) {
         if (block.type === 'WALL') {
@@ -2311,15 +2425,19 @@ export default function App() {
           });
         }
       } else if (block.hp > 0 && !isOverdriveActiveRef.current && Date.now() > invulnerableUntil.current) {
-        const shieldCollision = getShieldObstacleCollision(block.x, block.y, block.width, block.height, 12);
+        const shieldCollision = tentacleShieldCollision || getShieldObstacleCollision(block.x, block.y, block.width, block.height, 12);
 
         if (shieldCollision && isShieldObstacleRecoilPhase) {
-          applyShieldObstacleRecoil(
-            shieldCollision,
-            block.type === 'WALL' ? SLINGSHOT_SHIELD_WALL_RECOIL : SLINGSHOT_SHIELD_OBSTACLE_RECOIL,
-            1.1,
-            6,
-          );
+          if (block.type === 'TENTACLE') {
+            applyShieldRainTentacleDeflect(block, shieldCollision, 1.25, 5);
+          } else {
+            applyShieldObstacleRecoil(
+              shieldCollision,
+              block.type === 'WALL' ? SLINGSHOT_SHIELD_WALL_RECOIL : SLINGSHOT_SHIELD_OBSTACLE_RECOIL,
+              1.1,
+              6,
+            );
+          }
           if (block.type !== 'WALL') {
             block.hp -= 1;
             if (block.hp <= 0) {
@@ -2328,6 +2446,9 @@ export default function App() {
           }
         } else if (overlapsPlayer) {
           if (shieldCollision) {
+            if (block.type === 'TENTACLE') {
+              applyShieldRainTentacleDeflect(block, shieldCollision, 1.2, 4);
+            }
             playerVel.current.x += (shieldCollision.dx / shieldCollision.dist) * 4;
             playerVel.current.y += (shieldCollision.dy / shieldCollision.dist) * 4;
             if (block.type !== 'WALL') {
@@ -2336,9 +2457,11 @@ export default function App() {
                 triggerChainExplosion(block);
               }
             }
-            emitSlingshotShieldImpact(shieldCollision.centerX, shieldCollision.centerY, 1.1);
-            overdriveGauge.current = Math.max(0, overdriveGauge.current - 6);
-            setOverdrive(overdriveGauge.current);
+            if (block.type !== 'TENTACLE') {
+              emitSlingshotShieldImpact(shieldCollision.centerX, shieldCollision.centerY, 1.1);
+              overdriveGauge.current = Math.max(0, overdriveGauge.current - 6);
+              setOverdrive(overdriveGauge.current);
+            }
           } else {
             handlePlayerHit();
           }
@@ -2959,13 +3082,15 @@ export default function App() {
               for (let i = 0; i < 2; i++) {
                 const offsetX = (Math.random() - 0.5) * 60;
                 const offsetY = (Math.random() - 0.5) * 40;
+                const chaseTargetX = Math.max(40, Math.min(CANVAS_WIDTH - 40, playerPos.current.x + PLAYER_WIDTH / 2 + (Math.random() - 0.5) * 80));
+                const chaseTargetY = Math.max(120, Math.min(CANVAS_HEIGHT * 0.72, playerPos.current.y + PLAYER_HEIGHT / 2 + (Math.random() - 0.5) * 60));
                 const swarmEnemy: Enemy = {
                   ...createEnemy(enemy.x + enemy.width / 2 + offsetX, enemy.y + enemy.height + offsetY, 0),
                   isDiving: true,
                   diveType: 'chase',
-                  // Add significant jitter to target position to prevent overlap during chase
-                  diveX: playerPos.current.x + (Math.random() - 0.5) * 200,
-                  diveY: playerPos.current.y + (Math.random() - 0.5) * 200,
+                  // Keep chase targets near the player so attack runs stay hittable.
+                  diveX: chaseTargetX,
+                  diveY: chaseTargetY,
                   state: 'DIVING'
                 };
                 enemies.current.push(swarmEnemy);
@@ -2996,8 +3121,32 @@ export default function App() {
                   seg.x = prevX + Math.cos(seg.angle) * segLen;
                   seg.y = prevY + Math.sin(seg.angle) * segLen;
 
+                  const shieldCaughtTentacle = !isSlingshotAttacking && doesShieldCatchPoint(seg.x, seg.y, 8);
+                  if (shieldCaughtTentacle && frameNow - lastTentacleShieldDeflectAt.current > TENTACLE_SHIELD_DEFLECT_COOLDOWN_MS) {
+                    lastTentacleShieldDeflectAt.current = frameNow;
+
+                    const tdx = seg.x - playerCenterX;
+                    const tdy = seg.y - playerCenterY;
+                    const tdist = Math.max(1, Math.sqrt(tdx * tdx + tdy * tdy));
+                    const nx = tdx / tdist;
+                    const ny = tdy / tdist;
+
+                    seg.x += nx * 18;
+                    seg.y += ny * 18;
+                    seg.angle = Math.atan2(ny, nx);
+                    tentacle.targetAngle += nx * 0.2;
+
+                    enemy.knockbackVX = nx * TENTACLE_SHIELD_DEFLECT_KNOCKBACK;
+                    enemy.knockbackVY = ny * (TENTACLE_SHIELD_DEFLECT_KNOCKBACK * 0.8);
+                    enemy.stunnedUntil = Math.max(enemy.stunnedUntil || 0, currentTime + TENTACLE_SHIELD_DEFLECT_STUN_MS);
+
+                    emitSlingshotShieldImpact(seg.x, seg.y, 1.15);
+                    overdriveGauge.current = Math.max(0, overdriveGauge.current - 5);
+                    setOverdrive(overdriveGauge.current);
+                  }
+
                   // Collision with player
-                  if (sIdx % tentacleCollisionStride === 0) {
+                  if (!shieldCaughtTentacle && sIdx % tentacleCollisionStride === 0) {
                     const pdx = (playerPos.current.x + PLAYER_WIDTH / 2) - seg.x;
                     const pdy = (playerPos.current.y + PLAYER_HEIGHT / 2) - seg.y;
                     if ((pdx * pdx + pdy * pdy) < 400 && invulnerableUntil.current < currentTime) {
@@ -3179,6 +3328,21 @@ export default function App() {
             enemy.diveTime = 0;
           }
         } else if (enemy.diveType === 'chase') {
+          const chaseLockFrames = 30;
+          const chaseAbortFrames = 96;
+          const chaseReachDistance = 18;
+          const chaseExitY = CANVAS_HEIGHT + 80;
+          const liveTargetX = Math.max(40, Math.min(CANVAS_WIDTH - 40, playerPos.current.x + PLAYER_WIDTH / 2));
+          const liveTargetY = Math.max(120, Math.min(CANVAS_HEIGHT * 0.72, playerPos.current.y + PLAYER_HEIGHT / 2));
+
+          if (enemy.diveTime < chaseLockFrames) {
+            enemy.diveX = (enemy.diveX || liveTargetX) * 0.82 + liveTargetX * 0.18;
+            enemy.diveY = (enemy.diveY || liveTargetY) * 0.82 + liveTargetY * 0.18;
+          } else {
+            enemy.diveX = enemy.x;
+            enemy.diveY = chaseExitY;
+          }
+
           // Under reduced sim, use stride sampling for chase enemies (skip sqrt every frame)
           const chaseEnemyStride = isCriticalSim ? 4 : isReducedSim ? 2 : 1;
           const shouldUpdateChase = frameCounterRef.current % chaseEnemyStride === 0;
@@ -3187,15 +3351,24 @@ export default function App() {
             const dx = (enemy.diveX || 0) - enemy.x;
             const dy = (enemy.diveY || 0) - enemy.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist > 5) {
+            if (dist > chaseReachDistance) {
               enemy.x += (dx / dist) * enemy.speedScale * currentEnemyDiveSpeed * 1.5 * dt;
               enemy.y += (dy / dist) * enemy.speedScale * currentEnemyDiveSpeed * 1.5 * dt;
             } else {
-              enemy.y += currentEnemyDiveSpeed * enemy.speedScale * dt;
+              enemy.diveX = enemy.x;
+              enemy.diveY = chaseExitY;
+              enemy.y += currentEnemyDiveSpeed * enemy.speedScale * 1.35 * dt;
             }
           } else {
             // Keep position unchanged this frame
             enemy.y += currentEnemyDiveSpeed * enemy.speedScale * dt;
+          }
+
+          if (enemy.diveTime > chaseAbortFrames) {
+            enemy.isDiving = false;
+            enemy.isReturning = true;
+            enemy.state = 'RETURNING';
+            enemy.diveTime = 0;
           }
         } else {
           enemy.y += currentEnemyDiveSpeed * enemy.speedScale * dt;
@@ -3219,11 +3392,12 @@ export default function App() {
           enemy.isReturning = true;
           enemy.state = 'RETURNING';
         } else if (enemy.diveType === 'chase') {
-          // Wrap around
-          if (enemy.x < -100) enemy.x = CANVAS_WIDTH + 50;
-          if (enemy.x > CANVAS_WIDTH + 100) enemy.x = -50;
-          if (enemy.y < -100) enemy.y = CANVAS_HEIGHT + 50;
-          if (enemy.y > CANVAS_HEIGHT + 100) enemy.y = -50;
+          if (enemy.y > CANVAS_HEIGHT + 80 || enemy.x < -140 || enemy.x > CANVAS_WIDTH + 140) {
+            enemy.isDiving = false;
+            enemy.isReturning = true;
+            enemy.state = 'RETURNING';
+            enemy.diveTime = 0;
+          }
         } else if (enemy.y > CANVAS_HEIGHT) {
           enemy.y = -40;
           enemy.isDiving = false;
@@ -3693,6 +3867,72 @@ export default function App() {
       }
     }
 
+    // Emergency spacing: if durable enemies and bullets overfill the local area, clear a minimal escape lane.
+    if (
+      gameState === 'PLAYING'
+      && currentStage > 1
+      && frameNow - lastAutoSpaceAt.current > AUTO_SPACE_COOLDOWN_MS
+    ) {
+      const playerCX = playerPos.current.x + PLAYER_WIDTH / 2;
+      const playerCY = playerPos.current.y + PLAYER_HEIGHT / 2;
+
+      const hardEnemies = aliveEnemies.filter((enemy) => {
+        if (!enemy.alive || enemy.isBoss) return false;
+        const isDurableType = enemy.type >= 2 || enemy.type === 4;
+        if (!isDurableType) return false;
+        const enemyCX = enemy.x + enemy.width / 2;
+        const enemyCY = enemy.y + enemy.height / 2;
+        const dx = enemyCX - playerCX;
+        const dy = enemyCY - playerCY;
+        return (dx * dx + dy * dy) <= AUTO_SPACE_HARD_ENEMY_RADIUS * AUTO_SPACE_HARD_ENEMY_RADIUS;
+      });
+
+      const nearbyBulletIndices = eBullets
+        .map((bullet, index) => {
+          const bx = bullet.x + 2;
+          const by = bullet.y + 6;
+          const dx = bx - playerCX;
+          const dy = by - playerCY;
+          return { index, distSq: dx * dx + dy * dy };
+        })
+        .filter((item) => item.distSq <= AUTO_SPACE_BULLET_RADIUS * AUTO_SPACE_BULLET_RADIUS)
+        .sort((a, b) => a.distSq - b.distSq);
+
+      if (hardEnemies.length >= AUTO_SPACE_MIN_HARD_ENEMIES && nearbyBulletIndices.length >= AUTO_SPACE_MIN_BULLETS) {
+        hardEnemies
+          .slice(0, 5)
+          .forEach((enemy) => {
+            const enemyCX = enemy.x + enemy.width / 2;
+            const enemyCY = enemy.y + enemy.height / 2;
+            const dx = enemyCX - playerCX;
+            const dy = enemyCY - playerCY;
+            const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+            enemy.x += (dx / dist) * AUTO_SPACE_ENEMY_PUSH;
+            enemy.y += (dy / dist) * AUTO_SPACE_ENEMY_PUSH * 0.8;
+            if (enemy.isDiving) {
+              enemy.isDiving = false;
+              enemy.isReturning = true;
+              enemy.state = 'RETURNING';
+              enemy.diveTime = 0;
+            }
+          });
+
+        const removeIndices = nearbyBulletIndices
+          .slice(0, AUTO_SPACE_BULLET_CLEAR_MAX)
+          .map((item) => item.index)
+          .sort((a, b) => b - a);
+        removeIndices.forEach((index) => {
+          if (index >= 0 && index < eBullets.length) eBullets.splice(index, 1);
+        });
+
+        invulnerableUntil.current = Math.max(invulnerableUntil.current, frameNow + 260);
+        flash.current = Math.max(flash.current, 0.18);
+        shake.current = Math.max(shake.current, 5);
+        createExplosion(playerCX, playerCY, '#00ffcc', 10);
+        lastAutoSpaceAt.current = frameNow;
+      }
+    }
+
     if (playerHit && Date.now() > invulnerableUntil.current) {
       if (godModeRef.current) return;
       // COUNTER HIT: If hit while dragging a high-tension slingshot, it's extra dangerous!
@@ -3831,7 +4071,7 @@ export default function App() {
     }
 
     // Wave Completion Logic
-    const isTimeBasedStage = currentStage === 2 || currentStage === 3; // Asteroid Belt + Heavy Fire are survival based
+    const isTimeBasedStage = isSurvivalStage(currentStage);
     const survivalDuration = getSurvivalDurationFromStage(currentStage);
 
     let isWaveCleared = false;
@@ -4333,16 +4573,7 @@ export default function App() {
       ctx.restore();
     });
 
-    // Overdrive Screen Effect
-    if (isOverdriveActiveRef.current) {
-      ctx.save();
-      ctx.globalCompositeOperation = 'screen';
-      const pulse = Math.sin(Date.now() / 100) * 0.1;
-      const overdriveFxScale = renderLoadTierRef.current === 2 ? 0.35 : renderLoadTierRef.current === 1 ? 0.65 : 1;
-      ctx.fillStyle = `rgba(255, 51, 102, ${(0.1 + pulse) * overdriveFxScale})`;
-      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-      ctx.restore();
-    }
+    // Full-screen overdrive wash removed to keep frame pacing stable during movement-heavy sections.
 
     // Draw Obstacles
     obstacles.current.forEach(obs => {
@@ -4358,6 +4589,11 @@ export default function App() {
       if (isFinalFrontStage) {
         ctx.fillStyle = 'rgba(4, 8, 20, 0.55)';
         ctx.fillRect(-2, -2, obs.width + 4, obs.height + 4);
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.72)';
+        ctx.lineWidth = 6;
+        ctx.strokeRect(-1, -1, obs.width + 2, obs.height + 2);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 4;
       }
 
       // Outer border
@@ -4372,10 +4608,11 @@ export default function App() {
 
       // Inner details based on type
       ctx.lineWidth = 1;
-      ctx.globalAlpha = 0.3;
+      ctx.globalAlpha = isFinalFrontStage ? 0.16 : 0.3;
       if (obs.type === 'WALL') {
         // Diagonal lines
-        for (let i = 0; i < obs.width + obs.height; i += 20) {
+        const detailStep = isFinalFrontStage ? 28 : 20;
+        for (let i = 0; i < obs.width + obs.height; i += detailStep) {
           ctx.beginPath();
           ctx.moveTo(Math.max(0, i - obs.height), Math.min(i, obs.height));
           ctx.lineTo(Math.min(i, obs.width), Math.max(0, i - obs.width));
@@ -4383,13 +4620,14 @@ export default function App() {
         }
       } else if (obs.type === 'BUILDING') {
         // Grid pattern
-        for (let x = 20; x < obs.width; x += 20) {
+        const detailStep = isFinalFrontStage ? 28 : 20;
+        for (let x = detailStep; x < obs.width; x += detailStep) {
           ctx.beginPath();
           ctx.moveTo(x, 0);
           ctx.lineTo(x, obs.height);
           ctx.stroke();
         }
-        for (let y = 20; y < obs.height; y += 20) {
+        for (let y = detailStep; y < obs.height; y += detailStep) {
           ctx.beginPath();
           ctx.moveTo(0, y);
           ctx.lineTo(obs.width, y);
@@ -4397,7 +4635,8 @@ export default function App() {
         }
       } else {
         // Concentric squares
-        for (let i = 10; i < Math.min(obs.width, obs.height) / 2; i += 10) {
+        const detailStep = isFinalFrontStage ? 14 : 10;
+        for (let i = detailStep; i < Math.min(obs.width, obs.height) / 2; i += detailStep) {
           ctx.strokeRect(i, i, obs.width - i * 2, obs.height - i * 2);
         }
       }
@@ -4424,11 +4663,16 @@ export default function App() {
       ctx.shadowBlur = block.type === 'WALL' ? 0 : (isFinalFrontStage ? 9 : 15);
       ctx.shadowColor = color;
       ctx.strokeStyle = color;
-      ctx.lineWidth = block.type === 'WALL' ? 1 : 2;
+      ctx.lineWidth = block.type === 'WALL' ? (isFinalFrontStage ? 2 : 1) : 2;
 
       if (isFinalFrontStage) {
         ctx.fillStyle = 'rgba(5, 9, 24, 0.55)';
         ctx.fillRect(-2, -2, block.width + 4, block.height + 4);
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(-1, -1, block.width + 2, block.height + 2);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = block.type === 'WALL' ? 2 : 2;
       }
 
       if (block.type === 'WALL') {
@@ -4490,7 +4734,7 @@ export default function App() {
         ctx.strokeRect(2, 2, block.width - 4, block.height - 4);
         // Inner details
         ctx.lineWidth = 1;
-        ctx.globalAlpha = 0.3;
+        ctx.globalAlpha = isFinalFrontStage ? 0.16 : 0.3;
         if (block.type === 'PILLAR') { // Core
           ctx.beginPath();
           ctx.arc(block.width / 2, block.height / 2, 15, 0, Math.PI * 2);
@@ -4678,20 +4922,14 @@ export default function App() {
       if (slingshotShieldState.active) {
         ctx.save();
         ctx.rotate(slingshotShieldState.angle - playerTilt.current);
-        ctx.strokeStyle = `rgba(120, 255, 240, ${slingshotShieldState.alpha})`;
-        ctx.lineWidth = slingshotShieldState.thickness;
-        if (!isMobile) {
-          ctx.shadowBlur = 18;
+        ctx.strokeStyle = `rgba(120, 255, 240, ${slingshotShieldState.alpha * 0.8})`;
+        ctx.lineWidth = Math.max(6, slingshotShieldState.thickness - 2);
+        if (!isMobile && renderLoadTierRef.current === 0) {
+          ctx.shadowBlur = 8;
           ctx.shadowColor = '#00ffcc';
         }
         ctx.beginPath();
         ctx.arc(0, 0, slingshotShieldState.radius, -Math.PI / 2, Math.PI / 2);
-        ctx.stroke();
-
-        ctx.globalAlpha = slingshotShieldState.alpha * 0.3;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, 0, slingshotShieldState.radius + slingshotShieldState.thickness * 0.5, -Math.PI / 2, Math.PI / 2);
         ctx.stroke();
         ctx.restore();
       }
@@ -5539,167 +5777,22 @@ export default function App() {
     }
 
     // Ambush Warning removed
-    const isTimeBasedStage = currentStage === 2 || currentStage === 3;
+    const isTimeBasedStage = isSurvivalStage(currentStage);
+    const shieldFxActive = getSlingshotShieldState(Date.now()).active;
 
     // Final Post-Processing to Main Canvas
     mainCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    mainCtx.drawImage(offscreenCanvas.current, 0, 0);
 
-    // Ghosting / Motion Trails (Trippy) - Skip under load
-    if (trippyIntensity.current > 0.4 && renderLoadTierRef.current === 0) {
-      mainCtx.save();
-      mainCtx.globalAlpha = 0.3 * trippyIntensity.current;
-      const offset = 5 * trippyIntensity.current;
-      mainCtx.drawImage(offscreenCanvas.current, offset, 0);
-      mainCtx.drawImage(offscreenCanvas.current, -offset, 0);
-      mainCtx.restore();
-    }
-
-    // Radial Warp Streaks (Stylish Warp) - Throttle under load
-    if (warpFactor.current > 0.1 && !isMobile && renderLoadTierRef.current <= 1) {
-      mainCtx.save();
-      mainCtx.translate(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
-
-      // Energy Tunnel Rings
-      for (let i = 0; i < 4; i++) {
-        const r = ((Date.now() * 0.6 + i * 250) % 1200) * warpFactor.current;
-        const alpha = (1 - r / 1200) * warpFactor.current * 0.25;
-        mainCtx.strokeStyle = i % 2 === 0 ? `rgba(0, 255, 204, ${alpha})` : `rgba(255, 51, 102, ${alpha})`;
-        mainCtx.lineWidth = 1 + (1 - r / 1200) * 3;
-        mainCtx.beginPath();
-        mainCtx.arc(0, 0, r, 0, Math.PI * 2);
-        mainCtx.stroke();
-
-        // Add some "energy bits" on the rings
-        if (warpFactor.current > 0.7) {
-          for (let j = 0; j < 3; j++) {
-            const angle = (Date.now() * 0.003 + j * (Math.PI * 2 / 3));
-            mainCtx.fillStyle = '#ffffff';
-            mainCtx.beginPath();
-            mainCtx.arc(Math.cos(angle) * r, Math.sin(angle) * r, 1.5, 0, Math.PI * 2);
-            mainCtx.fill();
-          }
-        }
-      }
-
-      // Warp Streaks
-      const streakCount = 20;
-      for (let i = 0; i < streakCount; i++) {
-        mainCtx.save();
-        const angle = (i / streakCount) * Math.PI * 2 + Date.now() * 0.001;
-        const len = 150 + Math.random() * 600 * warpFactor.current;
-        mainCtx.rotate(angle);
-
-        const grad = mainCtx.createLinearGradient(0, 0, 0, len);
-        grad.addColorStop(0, 'transparent');
-        grad.addColorStop(0.2, `rgba(0, 255, 204, ${warpFactor.current * 0.4})`);
-        grad.addColorStop(0.5, `rgba(255, 255, 255, ${warpFactor.current * 0.6})`);
-        grad.addColorStop(0.8, `rgba(255, 51, 102, ${warpFactor.current * 0.4})`);
-        grad.addColorStop(1, 'transparent');
-
-        mainCtx.strokeStyle = grad;
-        mainCtx.lineWidth = 1.5 + Math.random() * 2;
-        mainCtx.beginPath();
-        mainCtx.moveTo(0, 30);
-        mainCtx.lineTo(0, 30 + len);
-        mainCtx.stroke();
-        mainCtx.restore();
-      }
-
-      // Center Glow
-      const glow = mainCtx.createRadialGradient(0, 0, 0, 0, 0, 100 * warpFactor.current);
-      glow.addColorStop(0, `rgba(255, 255, 255, ${warpFactor.current * 0.8})`);
-      glow.addColorStop(1, 'transparent');
-      mainCtx.fillStyle = glow;
-      mainCtx.beginPath();
-      mainCtx.arc(0, 0, 100 * warpFactor.current, 0, Math.PI * 2);
-      mainCtx.fill();
-
-      mainCtx.restore();
-    }
-
-    // UI Glitch during Warp
-    if (warpFactor.current > 0.7) {
-      const glitchAmount = warpFactor.current * 10;
-      const warpGlitchCount = isMobile ? 1 : 2;
-      for (let i = 0; i < warpGlitchCount; i++) {
-        const x = Math.random() * CANVAS_WIDTH;
-        const y = Math.random() * 40; // Top HUD area
-        const w = Math.random() * 150 + 50;
-        const h = Math.random() * 5 + 2;
-        const dx = (Math.random() - 0.5) * glitchAmount;
-        mainCtx.drawImage(offscreenCanvas.current, x, y, w, h, x + dx, y, w, h);
-      }
-    }
-
-    // Chromatic Aberration
-    const caIntensity = (isOverdriveActiveRef.current ? 4 : 0) + (warpFactor.current * 15) + (glitch.current * 0.5) + (trippyIntensity.current * 10);
-
-    mainCtx.save();
-
-    // Kaleidoscope / Mirror Effect (Trippy) - Skip under load
-    if (trippyIntensity.current > 0.7 && renderLoadTierRef.current === 0) {
-      mainCtx.save();
-      mainCtx.translate(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
-      mainCtx.scale(-1, 1);
-      mainCtx.translate(-CANVAS_WIDTH / 2, -CANVAS_HEIGHT / 2);
-      mainCtx.globalAlpha = 0.2 * trippyIntensity.current;
-      mainCtx.drawImage(offscreenCanvas.current, 0, 0);
-      mainCtx.restore();
-    }
-
-    // Trippy Hue Rotation - Disabled on mobile and under load tier 1+
-    if (trippyIntensity.current > 0.1 && !isMobile && renderLoadTierRef.current === 0) {
-      const hue = (Date.now() / 50) % 360;
-      mainCtx.filter = `hue-rotate(${hue * trippyIntensity.current}deg) saturate(${100 + trippyIntensity.current * 100}%)`;
-    }
-
-    if (warpFactor.current > 0.2 || pulseRef.current > 0.1) {
-      // Radial Distortion (Fisheye) + Beat Pulse
-      const beatScale = pulseRef.current * 0.02 * trippyIntensity.current;
-      const distortionScale = 1 + warpFactor.current * 0.03 + beatScale;
-      mainCtx.translate(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
-      mainCtx.scale(distortionScale, distortionScale);
-      mainCtx.translate(-CANVAS_WIDTH / 2, -CANVAS_HEIGHT / 2);
-    }
-
-    // Chromatic Aberration - Skip under heavy load
-    if (caIntensity > (isMobile ? 4 : 0.5) && renderLoadTierRef.current === 0) {
-      mainCtx.globalCompositeOperation = 'screen';
-      // Red
-      mainCtx.drawImage(offscreenCanvas.current, -caIntensity, 0);
-      // Green (center)
-      if (!isMobile) mainCtx.drawImage(offscreenCanvas.current, 0, 0);
-      // Blue
-      mainCtx.drawImage(offscreenCanvas.current, caIntensity, 0);
-      mainCtx.globalCompositeOperation = 'source-over';
-    } else {
-      mainCtx.drawImage(offscreenCanvas.current, 0, 0);
-    }
-
-    // Glitch Effect - Reduced on mobile
-    if (glitch.current > 1) {
-      const glitchAmount = glitch.current;
-      const glitchCount = isMobile ? 1 : 4;
-      for (let i = 0; i < glitchCount; i++) {
-        const x = Math.random() * CANVAS_WIDTH;
-        const y = Math.random() * CANVAS_HEIGHT;
-        const w = Math.random() * 100 + 50;
-        const h = Math.random() * 20 + 5;
-        const dx = (Math.random() - 0.5) * glitchAmount * 2;
-        mainCtx.drawImage(offscreenCanvas.current, x, y, w, h, x + dx, y, w, h);
-      }
-    }
-
-    // Scanlines - disabled on mobile and auto-throttled under heavy load
-    if (!isMobile && renderLoadTierRef.current === 0) {
+    // Keep only lightweight screen finishing so visuals stay readable without affecting control timing.
+    if (!isMobile && renderLoadTierRef.current === 0 && !shieldFxActive) {
       mainCtx.fillStyle = 'rgba(18, 16, 16, 0.1)';
       for (let i = 0; i < CANVAS_HEIGHT; i += 4) {
         mainCtx.fillRect(0, i, CANVAS_WIDTH, 1);
       }
     }
 
-    // Vignette - keep on normal/reduced quality, disable on minimal tier
-    if (!isMobile && renderLoadTierRef.current < 2) {
+    if (!isMobile && renderLoadTierRef.current < 2 && !shieldFxActive) {
       const gradient = mainCtx.createRadialGradient(
         CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_WIDTH / 4,
         CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_WIDTH / 1.2
@@ -5709,14 +5802,6 @@ export default function App() {
       mainCtx.fillStyle = gradient;
       mainCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     }
-
-    // Static Noise
-    if (Math.random() > 0.9) {
-      mainCtx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.02})`;
-      mainCtx.fillRect(Math.random() * CANVAS_WIDTH, Math.random() * CANVAS_HEIGHT, 2, 2);
-    }
-
-    mainCtx.restore(); // Close the save from CA/Distortion
   };
 
   const loop = () => {
@@ -5926,15 +6011,16 @@ export default function App() {
         <AnimatePresence>
           {gameState === 'PLAYING' && !isWarpingState && (
             <motion.div
+              key="stage-progress-overlay"
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               className="absolute top-4 right-4 flex flex-col items-end gap-1"
             >
               <span className="text-[8px] text-[#00ffcc] font-bold uppercase tracking-widest">
-                {[2, 3].includes(Math.min(5, Math.ceil(wave / 2))) ? 'Survival_Protocol' : (waveHasBossRef.current ? 'Boss_Progress' : 'Engagement_Progress')}
+                {isSurvivalStage(Math.min(5, Math.ceil(wave / 2))) ? 'Survival_Protocol' : (waveHasBossRef.current ? 'Boss_Progress' : 'Engagement_Progress')}
               </span>
-              {[2, 3].includes(Math.min(5, Math.ceil(wave / 2))) ? (
+              {isSurvivalStage(Math.min(5, Math.ceil(wave / 2))) ? (
                 <div className="text-2xl font-black italic text-white drop-shadow-[0_0_10px_rgba(0,255,204,0.5)]">
                   {survivalTime}s
                 </div>
@@ -5957,6 +6043,7 @@ export default function App() {
         <AnimatePresence>
           {bossHealth && (
             <motion.div
+              key="boss-health-overlay"
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
@@ -5978,6 +6065,7 @@ export default function App() {
         <AnimatePresence>
           {showUpgrade && (
             <motion.div
+              key="upgrade-overlay"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -6029,7 +6117,7 @@ export default function App() {
             </motion.div>
           )}
 
-          {waveTitle && <StageTitleOverlay wave={wave} sectorName={sectorName} />}
+          {waveTitle && <StageTitleOverlay key={`stage-title-${wave}`} wave={wave} sectorName={sectorName} />}
 
           {gameState === 'LOADING' && (
             <motion.div
@@ -6187,6 +6275,7 @@ export default function App() {
 
           {gameState === 'VICTORY' && (
             <motion.div
+              key="victory-screen"
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
               className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 z-50 p-8 text-center"
