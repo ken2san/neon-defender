@@ -12,7 +12,7 @@ type GameHudProps = {
   overdrive: number;
   maxOverdrive: number;
   isOverdriveActive: boolean;
-  survivalTime: number;
+  stageProgress: number;
 };
 
 export default function GameHud({
@@ -26,7 +26,7 @@ export default function GameHud({
   overdrive,
   maxOverdrive,
   isOverdriveActive,
-  survivalTime,
+  stageProgress,
 }: GameHudProps) {
   return (
     <div className="w-full max-w-150 px-4 mb-3 flex flex-col gap-2 z-100 relative">
@@ -127,7 +127,7 @@ export default function GameHud({
 
       <div className="w-full h-0.75 bg-white/5 relative overflow-hidden rounded-full mt-1">
         <motion.div
-          animate={{ width: `${(1 - survivalTime / 30) * 100}%` }}
+          animate={{ width: `${Math.max(0, Math.min(100, stageProgress * 100))}%` }}
           className="h-full bg-linear-to-r from-[#ff3366] via-[#ffcc00] to-[#ff3366] shadow-[0_0_15px_rgba(255,51,102,0.6)]"
         />
         <div className="absolute inset-0 flex items-center justify-center">

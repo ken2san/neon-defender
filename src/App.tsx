@@ -5102,7 +5102,7 @@ export default function App() {
         overdrive={overdrive}
         maxOverdrive={MAX_OVERDRIVE}
         isOverdriveActive={isOverdriveActive}
-        survivalTime={survivalTime}
+        stageProgress={stageProgress}
       />
 
       {/* Game Canvas Container with Ambient Glow and Scanlines */}
