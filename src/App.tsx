@@ -42,6 +42,7 @@ const INPUT_WATCHDOG_RELEASE_MS = 280;
 const INPUT_WATCHDOG_HARD_RELEASE_MS = 1200;
 const INPUT_DEBUG_LOG_PARAM = 'inputDebug';
 const INPUT_DEBUG_STORAGE_KEY = 'neon:input-debug-log';
+const INPUT_DEBUG_BOOT_LOGGED_STORAGE_KEY = 'neon:input-debug-boot-logged';
 const INPUT_DEBUG_MIN_LOG_INTERVAL_MS = 120;
 
 const VFX_PARTICLE_DESKTOP_MULTIPLIER = 0.75;
@@ -205,10 +206,8 @@ export default function App() {
   const isMouseDown = useRef(false);
   const touchPoints = useRef<Record<number, { x: number, y: number }>>({});
   const lastTapTime = useRef(0);
-  const lastMouseTapTime = useRef(0);
-  const lastPointerTapTime = useRef(0); // records pointerdowns that were NOT followed by mousedown (macOS ate them)
   const pointerTapTimer = useRef<number | null>(null); // timer to detect orphaned pointerdowns
-  // Armed state: double-tap detected but released before dragging (trackpad support)
+  // Armed state used by touch flow when slingshot is released before charging.
   const slingshotArmed = useRef(false);
   const slingshotArmedExpiry = useRef(0);
   const slingshotArmedPos = useRef<{ x: number, y: number } | null>(null);
@@ -575,8 +574,6 @@ export default function App() {
     touchPoints.current = {};
 
     lastTapTime.current = 0;
-    lastMouseTapTime.current = 0;
-    lastPointerTapTime.current = 0;
     inputVel.current = { x: 0, y: 0 };
     inputHistory.current = [];
     slingshotGuardUntil.current = 0;
@@ -888,10 +885,11 @@ export default function App() {
   const logTouchDebug = (event: string, touchCount: number, details: Record<string, unknown> = {}) => {
     if (!inputDebugLogEnabledRef.current) return;
 
+    const now = Date.now();
     const snapshot = getInputDebugSnapshot();
     console.info('[NEON][TouchDebug]', {
       event,
-      ts: new Date().toISOString(),
+      ts: new Date(now).toISOString(),
       touchCount,
       gameState,
       wave: waveRef.current,
@@ -981,16 +979,21 @@ export default function App() {
       window.localStorage.setItem(INPUT_DEBUG_STORAGE_KEY, '1');
     } else if (param === '0') {
       window.localStorage.removeItem(INPUT_DEBUG_STORAGE_KEY);
+      window.sessionStorage.removeItem(INPUT_DEBUG_BOOT_LOGGED_STORAGE_KEY);
     }
 
     const enabled = param === '1' || window.localStorage.getItem(INPUT_DEBUG_STORAGE_KEY) === '1';
     inputDebugLogEnabledRef.current = enabled;
 
     if (enabled) {
-      console.info('[NEON][InputDebug] enabled. Disable with ?inputDebug=0');
-      logInputDebug('logging-enabled', {
-        source: param === '1' ? 'query' : 'storage',
-      });
+      const hasBootLogged = window.sessionStorage.getItem(INPUT_DEBUG_BOOT_LOGGED_STORAGE_KEY) === '1';
+      if (!hasBootLogged) {
+        console.info('[NEON][InputDebug] enabled. Disable with ?inputDebug=0');
+        logInputDebug('logging-enabled', {
+          source: param === '1' ? 'query' : 'storage',
+        });
+        window.sessionStorage.setItem(INPUT_DEBUG_BOOT_LOGGED_STORAGE_KEY, '1');
+      }
     }
   }, []);
 
@@ -1046,6 +1049,12 @@ export default function App() {
       if (gameState !== 'PLAYING' || showUpgrade) return;
       if (e.pointerType !== 'mouse' || e.button !== 0) return;
       markInputActivity();
+      logInputDebug('pointer-down', {
+        pointerType: e.pointerType,
+        button: e.button,
+        buttons: e.buttons,
+        ctrl: e.ctrlKey ? 1 : 0,
+      });
 
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -1056,8 +1065,7 @@ export default function App() {
       currentMousePos.current = { x, y };
 
       const now = Date.now();
-      const isPointerDoubleTap = now - lastPointerTapTime.current < TOUCH_DOUBLE_TAP_WINDOW_MS;
-      lastPointerTapTime.current = now;
+      const ctrlPressed = e.ctrlKey || keysPressed.current['ControlLeft'] || keysPressed.current['ControlRight'];
 
       if (pointerTapTimer.current !== null) {
         window.clearTimeout(pointerTapTimer.current);
@@ -1075,7 +1083,7 @@ export default function App() {
         mouseAnchorPos.current = { x, y };
         inputHistory.current = [{ x, y, t: now }];
 
-        if (isPointerDoubleTap || keysPressed.current['ControlLeft'] || keysPressed.current['ControlRight']) {
+        if (ctrlPressed) {
           isSlingshotMode.current = true;
           isSlingshotCharged.current = false;
           audio.playSlingshot?.();
@@ -1087,6 +1095,13 @@ export default function App() {
           isSlingshotMode.current = false;
           isSlingshotCharged.current = false;
         }
+
+        logInputDebug('pointer-virtual-drag-start', {
+          pointerType: e.pointerType,
+          x: Math.round(x),
+          y: Math.round(y),
+          slingshot: isSlingshotMode.current ? 1 : 0,
+        });
       }, 24);
     };
 
@@ -1177,12 +1192,13 @@ export default function App() {
         if (!isVirtualDragActive.current) return;
 
         if (isSlingshotMode.current) {
-          if (!isSlingshotCharged.current) {
-            armSlingshotAtCurrentPos();
-          } else {
+          if (isSlingshotCharged.current) {
             handleSlingshot();
             slingshotArmed.current = false;
             slingshotArmedPos.current = null;
+          } else {
+            isSlingshotMode.current = false;
+            isSlingshotCharged.current = false;
           }
         }
 
@@ -1555,6 +1571,15 @@ export default function App() {
     const handleMouseDown = (e: MouseEvent) => {
       if (gameState !== 'PLAYING' || showUpgrade) return;
       markInputActivity();
+      if (pointerTapTimer.current !== null) {
+        window.clearTimeout(pointerTapTimer.current);
+        pointerTapTimer.current = null;
+      }
+      logInputDebug('mouse-down', {
+        button: e.button,
+        buttons: e.buttons,
+        ctrl: e.ctrlKey ? 1 : 0,
+      });
       isVirtualDragActive.current = false;
       clearVirtualDragReleaseTimer();
 
@@ -1619,9 +1644,52 @@ export default function App() {
       if (gameState !== 'PLAYING' || showUpgrade) return;
       markInputActivity();
 
+      // Web/trackpad safety: if mousedown is swallowed but a drag is in progress,
+      // synthesize drag start from the first move packet that reports button state.
+      if (!isMouseDown.current && !isTouching.current && (e.buttons & 1) === 1) {
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (rect) {
+          canvasScaleRef.current = rect.height / CANVAS_HEIGHT;
+          const x = ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
+          const y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
+          const now = Date.now();
+
+          isMouseDown.current = true;
+          isVirtualDragActive.current = false;
+          clearVirtualDragReleaseTimer();
+          currentMousePos.current = { x, y };
+          mouseAnchorPos.current = { x, y };
+          playerStartPos.current = { x: playerPos.current.x, y: playerPos.current.y };
+          inputHistory.current = [{ x, y, t: now }];
+
+          const ctrlHeld = e.ctrlKey || keysPressed.current['ControlLeft'] || keysPressed.current['ControlRight'];
+          isSlingshotMode.current = ctrlHeld;
+          isSlingshotCharged.current = false;
+          if (ctrlHeld) {
+            audio.playSlingshot?.();
+            shake.current = Math.max(shake.current, 5);
+            createExplosion(x, y, '#00ffcc', 20);
+            timeScale.current = 0.2;
+            setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 100);
+          }
+
+          logInputDebug('mouse-down-missed-detected', {
+            buttons: e.buttons,
+            ctrl: ctrlHeld ? 1 : 0,
+            x: Math.round(x),
+            y: Math.round(y),
+          });
+        }
+      }
+
       // Web/trackpad safety: if mouseup was swallowed by gesture handling,
       // force-release stale drag state when no button is currently pressed.
       if (isMouseDown.current && !isVirtualDragActive.current && e.buttons === 0 && !isTouching.current) {
+        logInputDebug('mouse-up-missed-detected', {
+          buttons: e.buttons,
+          x: Math.round(e.clientX),
+          y: Math.round(e.clientY),
+        });
         handleMouseUp();
       }
 
@@ -1647,27 +1715,6 @@ export default function App() {
           }
         }
 
-        // Trackpad fallback: when double-tap armed but no mousedown is generated,
-        // promote movement into a virtual drag so slingshot can still charge/fire.
-        if (!isMouseDown.current && !isTouching.current && slingshotArmed.current && now < slingshotArmedExpiry.current && slingshotArmedPos.current) {
-          const armedDx = x - slingshotArmedPos.current.x;
-          const armedDy = y - slingshotArmedPos.current.y;
-          const armedDist = Math.sqrt(armedDx * armedDx + armedDy * armedDy);
-          if (armedDist > 4) {
-            isMouseDown.current = true;
-            isVirtualDragActive.current = true;
-            isSlingshotMode.current = true;
-            mouseAnchorPos.current = { x: slingshotArmedPos.current.x, y: slingshotArmedPos.current.y };
-            playerStartPos.current = { x: playerPos.current.x, y: playerPos.current.y };
-            inputHistory.current = [
-              { x: slingshotArmedPos.current.x, y: slingshotArmedPos.current.y, t: now },
-              { x, y, t: now }
-            ];
-            slingshotArmed.current = false;
-            slingshotArmedPos.current = null;
-          }
-        }
-
         if (isVirtualDragActive.current) {
           scheduleVirtualDragRelease();
         }
@@ -1690,6 +1737,13 @@ export default function App() {
         }
 
         if (isMouseDown.current && mouseAnchorPos.current) {
+          // If the player starts a normal drag right after slingshot, prioritize control feel.
+          if (!isSlingshotMode.current && isSnapping.current > 0) {
+            isSnapping.current = 0;
+            playerVel.current.x = 0;
+            playerVel.current.y = 0;
+          }
+
           if (isSlingshotMode.current) {
             const rawDx = (x - mouseAnchorPos.current.x);
             const rawDy = (y - mouseAnchorPos.current.y);
@@ -1720,6 +1774,22 @@ export default function App() {
 
     const handleMouseUp = () => {
       markInputActivity();
+
+      // Avoid duplicate mouseup handling when release was already synthesized.
+      if (!isMouseDown.current && !isVirtualDragActive.current) {
+        return;
+      }
+
+      if (pointerTapTimer.current !== null) {
+        window.clearTimeout(pointerTapTimer.current);
+        pointerTapTimer.current = null;
+      }
+
+      logInputDebug('mouse-up', {
+        virtual: isVirtualDragActive.current ? 1 : 0,
+        slingshot: isSlingshotMode.current ? 1 : 0,
+        charged: isSlingshotCharged.current ? 1 : 0,
+      });
       isVirtualDragActive.current = false;
       clearVirtualDragReleaseTimer();
       if (idleFireTimer.current !== null) { window.clearTimeout(idleFireTimer.current); idleFireTimer.current = null; }
@@ -1730,8 +1800,11 @@ export default function App() {
           slingshotArmed.current = false;
           slingshotArmedPos.current = null;
         } else if (isSlingshotMode.current && !isSlingshotCharged.current) {
-          // Slingshot mode but not dragged enough: re-arm for next gesture
-          armSlingshotAtCurrentPos();
+          // Ctrl slingshot not charged enough: cancel without re-arming.
+          isSlingshotMode.current = false;
+          isSlingshotCharged.current = false;
+          slingshotArmed.current = false;
+          slingshotArmedPos.current = null;
         } else {
           // Normal precision drag released
           handleSlingshot();
@@ -1745,6 +1818,10 @@ export default function App() {
 
     const handleBlur = () => {
       markInputActivity();
+      if (pointerTapTimer.current !== null) {
+        window.clearTimeout(pointerTapTimer.current);
+        pointerTapTimer.current = null;
+      }
       clearVirtualDragReleaseTimer();
       if (idleFireTimer.current !== null) { window.clearTimeout(idleFireTimer.current); idleFireTimer.current = null; }
       isVirtualDragActive.current = false;
