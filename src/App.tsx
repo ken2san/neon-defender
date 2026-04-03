@@ -44,6 +44,13 @@ const VFX_PARTICLE_MOBILE_MULTIPLIER = 0.18;
 const VFX_TRAIL_SPAWN_INTERVAL_MS = 20;
 const VFX_TRAIL_ALPHA = 0.32;
 const VFX_SLINGSHOT_TRAIL_ALPHA = 0.42;
+const SLINGSHOT_SHIELD_MIN_PULL = 18;
+const SLINGSHOT_SHIELD_MIN_RADIUS = 42;
+const SLINGSHOT_SHIELD_MAX_RADIUS = 122;
+const SLINGSHOT_SHIELD_THICKNESS = 18;
+const SLINGSHOT_SHIELD_HALF_ARC = Math.PI / 2;
+const SLINGSHOT_DEFENSE_ONLY_MAX_PULL = 72;
+const SLINGSHOT_DEFENSE_ONLY_GUARD_MS = 360;
 const SLINGSHOT_GUARD_COOLDOWN_MS = 1200;
 const SLINGSHOT_GUARD_SMALL_MS = 280;
 const SLINGSHOT_GUARD_LARGE_MS = 450;
@@ -172,6 +179,9 @@ export default function App() {
   const slingshotAttackUntil = useRef(0);
   const slingshotGuardUntil = useRef(0);
   const slingshotGuardCooldownUntil = useRef(0);
+  const slingshotShieldAngle = useRef(-Math.PI / 2);
+  const slingshotShieldRadius = useRef(56);
+  const slingshotShieldFxAt = useRef(0);
 
   // Power-up & Overdrive State
   const powerUps = useRef<PowerUp[]>([]);
@@ -518,6 +528,54 @@ export default function App() {
     inputHistory.current = [];
     slingshotGuardUntil.current = 0;
     slingshotGuardCooldownUntil.current = 0;
+    slingshotShieldAngle.current = -Math.PI / 2;
+    slingshotShieldRadius.current = 56;
+  };
+
+  const normalizeAngle = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
+
+  const getSlingshotShieldState = (now: number) => {
+    const anchor = mouseAnchorPos.current || (isTouching.current ? { x: touchStartPos.current.x, y: touchStartPos.current.y } : null);
+    const isDraggingShield = (isMouseDown.current || isTouching.current || isVirtualDragActive.current) && isSlingshotMode.current && anchor;
+
+    if (isDraggingShield && anchor) {
+      const rawDx = anchor.x - currentMousePos.current.x;
+      const rawDy = anchor.y - currentMousePos.current.y;
+      const pullDist = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
+
+      if (pullDist >= SLINGSHOT_SHIELD_MIN_PULL) {
+        const angle = Math.atan2(rawDy, rawDx);
+        const diameter = Math.min(SLINGSHOT_SHIELD_MAX_RADIUS * 2, SLINGSHOT_SHIELD_MIN_RADIUS * 2 + pullDist * 0.9);
+        const radius = diameter * 0.5;
+        slingshotShieldAngle.current = angle;
+        slingshotShieldRadius.current = radius;
+        return {
+          active: true,
+          angle,
+          radius,
+          thickness: SLINGSHOT_SHIELD_THICKNESS,
+          alpha: Math.min(0.92, 0.36 + pullDist / 220),
+        };
+      }
+    }
+
+    if (now < slingshotGuardUntil.current) {
+      return {
+        active: true,
+        angle: slingshotShieldAngle.current,
+        radius: slingshotShieldRadius.current,
+        thickness: SLINGSHOT_SHIELD_THICKNESS,
+        alpha: 0.42,
+      };
+    }
+
+    return {
+      active: false,
+      angle: slingshotShieldAngle.current,
+      radius: slingshotShieldRadius.current,
+      thickness: SLINGSHOT_SHIELD_THICKNESS,
+      alpha: 0,
+    };
   };
 
   const startNextWave = () => {
@@ -755,6 +813,8 @@ export default function App() {
     invulnerableUntil.current = 0;
     slingshotGuardUntil.current = 0;
     slingshotGuardCooldownUntil.current = 0;
+    slingshotShieldAngle.current = -Math.PI / 2;
+    slingshotShieldRadius.current = 56;
     playerPos.current = { x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 };
     targetPos.current = { x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 };
     bullets.current = [];
@@ -951,8 +1011,13 @@ export default function App() {
           const finalDx = rawDx * resistance;
           const finalDy = rawDy * resistance;
 
-          targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + finalDx));
-          targetPos.current.y = Math.max(0, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerStartPos.current.y + finalDy));
+          if (dist <= SLINGSHOT_DEFENSE_ONLY_MAX_PULL) {
+            targetPos.current.x = playerStartPos.current.x;
+            targetPos.current.y = playerStartPos.current.y;
+          } else {
+            targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + finalDx));
+            targetPos.current.y = Math.max(0, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerStartPos.current.y + finalDy));
+          }
         } else {
           // PRECISION MODE: 1:1 Movement
           const rawDx = (x - touchStartPos.current.x);
@@ -998,10 +1063,42 @@ export default function App() {
       const mag = Math.sqrt(inputDx * inputDx + inputDy * inputDy) || 1;
       const dirX = inputDx / mag;
       const dirY = inputDy / mag;
+      slingshotShieldAngle.current = Math.atan2(dirY, dirX);
+      slingshotShieldRadius.current = Math.min(SLINGSHOT_SHIELD_MAX_RADIUS, (SLINGSHOT_SHIELD_MIN_RADIUS * 2 + inputDist * 0.9) * 0.5);
+
+      // Flick Detection
+      const inputSpeed = Math.sqrt(inputVel.current.x ** 2 + inputVel.current.y ** 2);
+      const isFlick = inputSpeed > 400;
+      const isDefenseOnlyRelease = isSlingshotCharged.current
+        && inputDist <= SLINGSHOT_DEFENSE_ONLY_MAX_PULL;
 
       // If not charged or not in slingshot mode, just settle
       if (!isSlingshotCharged.current || !isSlingshotMode.current) {
         isSnapping.current = 0;
+        isSlingshotCharged.current = false;
+        isSlingshotMode.current = false;
+        return;
+      }
+
+      const tryActivateSlingshotGuard = (durationMs: number) => {
+        const now = Date.now();
+        if (now < slingshotGuardCooldownUntil.current) return;
+        slingshotGuardUntil.current = Math.max(slingshotGuardUntil.current, now + durationMs);
+        slingshotGuardCooldownUntil.current = now + SLINGSHOT_GUARD_COOLDOWN_MS;
+      };
+
+      if (isDefenseOnlyRelease) {
+        playerVel.current.x = 0;
+        playerVel.current.y = 0;
+        targetPos.current.x = playerPos.current.x;
+        targetPos.current.y = playerPos.current.y;
+        isSnapping.current = 0;
+        tryActivateSlingshotGuard(SLINGSHOT_DEFENSE_ONLY_GUARD_MS);
+        createExplosion(centerX, centerY, '#00ffcc', isMobile ? 2 : 4);
+        shake.current = Math.max(shake.current, 1.5);
+        audio.playSlingshot?.();
+        inputVel.current = { x: 0, y: 0 };
+        inputHistory.current = [];
         isSlingshotCharged.current = false;
         isSlingshotMode.current = false;
         return;
@@ -1014,16 +1111,6 @@ export default function App() {
       targetPos.current = {
         x: Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, landingCenterX - PLAYER_WIDTH / 2)),
         y: Math.max(CANVAS_HEIGHT * 0.1, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, landingCenterY - PLAYER_HEIGHT / 2))
-      };
-
-      // Flick Detection
-      const inputSpeed = Math.sqrt(inputVel.current.x ** 2 + inputVel.current.y ** 2);
-      const isFlick = inputSpeed > 400;
-      const tryActivateSlingshotGuard = (durationMs: number) => {
-        const now = Date.now();
-        if (now < slingshotGuardCooldownUntil.current) return;
-        slingshotGuardUntil.current = Math.max(slingshotGuardUntil.current, now + durationMs);
-        slingshotGuardCooldownUntil.current = now + SLINGSHOT_GUARD_COOLDOWN_MS;
       };
 
       // 1. DEADZONE / ADJUSTMENT MODE (Small pull)
@@ -1303,8 +1390,13 @@ export default function App() {
             const finalDx = rawDx * resistance;
             const finalDy = rawDy * resistance;
 
-            targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + finalDx));
-            targetPos.current.y = Math.max(0, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerStartPos.current.y + finalDy));
+            if (dist <= SLINGSHOT_DEFENSE_ONLY_MAX_PULL) {
+              targetPos.current.x = playerStartPos.current.x;
+              targetPos.current.y = playerStartPos.current.y;
+            } else {
+              targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + finalDx));
+              targetPos.current.y = Math.max(0, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerStartPos.current.y + finalDy));
+            }
           } else {
             const rawDx = (x - mouseAnchorPos.current.x);
             const rawDy = (y - mouseAnchorPos.current.y);
@@ -1877,6 +1969,38 @@ export default function App() {
       setIntegrity(integrityRef.current);
     }
 
+    const frameNow = Date.now();
+    const shieldState = getSlingshotShieldState(frameNow);
+    const playerCenterX = playerPos.current.x + PLAYER_WIDTH / 2;
+    const playerCenterY = playerPos.current.y + PLAYER_HEIGHT / 2;
+    const emitSlingshotShieldImpact = (x: number, y: number, intensity = 1) => {
+      if (frameNow - slingshotShieldFxAt.current < 45) return;
+      slingshotShieldFxAt.current = frameNow;
+      createExplosion(x, y, '#00ffcc', Math.max(4, Math.round(4 + intensity * 3)));
+      shake.current = Math.max(shake.current, 2 + intensity * 2);
+    };
+    const doesShieldCatchPoint = (x: number, y: number, padding = 0) => {
+      if (!shieldState.active) return false;
+      const dx = x - playerCenterX;
+      const dy = y - playerCenterY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const angleOffset = Math.abs(normalizeAngle(Math.atan2(dy, dx) - shieldState.angle));
+      const shieldInnerRadius = Math.max(18, shieldState.radius - shieldState.thickness * 1.35 - padding);
+      const shieldOuterRadius = shieldState.radius + shieldState.thickness + padding;
+      return angleOffset <= SLINGSHOT_SHIELD_HALF_ARC && dist >= shieldInnerRadius && dist <= shieldOuterRadius;
+    };
+    const doesShieldCatchRect = (x: number, y: number, width: number, height: number, padding = 0) => {
+      if (!shieldState.active) return false;
+      const closestX = Math.max(x, Math.min(playerCenterX, x + width));
+      const closestY = Math.max(y, Math.min(playerCenterY, y + height));
+
+      if (closestX === playerCenterX && closestY === playerCenterY) {
+        return doesShieldCatchPoint(x + width / 2, y + height / 2, Math.max(width, height) * 0.35 + padding);
+      }
+
+      return doesShieldCatchPoint(closestX, closestY, padding);
+    };
+
     // Maze Generation (Canyon)
     const scrollSpeed = 3 * worldSpeedScale;
     lastBlockRowY.current += scrollSpeed;
@@ -1904,7 +2028,26 @@ export default function App() {
             playerPos.current.x + PLAYER_WIDTH > block.x &&
             playerPos.current.y < block.y + block.height &&
             playerPos.current.y + PLAYER_HEIGHT > block.y) {
-          handlePlayerHit();
+          if (doesShieldCatchRect(block.x, block.y, block.width, block.height, 12)) {
+            const blockCenterX = block.x + block.width / 2;
+            const blockCenterY = block.y + block.height / 2;
+            const dx = playerCenterX - blockCenterX;
+            const dy = playerCenterY - blockCenterY;
+            const pushDist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+            playerVel.current.x += (dx / pushDist) * 4;
+            playerVel.current.y += (dy / pushDist) * 4;
+            if (block.type !== 'WALL') {
+              block.hp -= 1;
+              if (block.hp <= 0) {
+                triggerChainExplosion(block);
+              }
+            }
+            emitSlingshotShieldImpact(blockCenterX, blockCenterY, 1.1);
+            overdriveGauge.current = Math.max(0, overdriveGauge.current - 6);
+            setOverdrive(overdriveGauge.current);
+          } else {
+            handlePlayerHit();
+          }
         }
       }
 
@@ -1927,7 +2070,6 @@ export default function App() {
     });
     blocks.current = blocks.current.filter(b => b.y < CANVAS_HEIGHT + 100);
 
-    const frameNow = Date.now();
     const isSlingshotAttacking = frameNow < slingshotAttackUntil.current;
     const registerSlingshotCombo = (basePoints: number) => {
       if (!isSlingshotAttacking) return;
@@ -1992,6 +2134,15 @@ export default function App() {
             audio.playExplosion(a.x);
             registerSlingshotCombo(120);
           }
+        } else if (doesShieldCatchPoint(a.x, a.y, a.size * 0.5)) {
+          const pushDist = Math.max(1, dist);
+          a.vx -= (dx / pushDist) * 6;
+          a.vy -= (dy / pushDist) * 6;
+          playerVel.current.x += (dx / pushDist) * 1.5;
+          playerVel.current.y += (dy / pushDist) * 1.5;
+          emitSlingshotShieldImpact(a.x, a.y, 1.2);
+          overdriveGauge.current = Math.max(0, overdriveGauge.current - 8);
+          setOverdrive(overdriveGauge.current);
         } else if (Date.now() > invulnerableUntil.current) {
           handlePlayerHit();
           a.hp = 0; // Destroy on impact
@@ -2149,7 +2300,28 @@ export default function App() {
       const py = playerPos.current.y;
       if (px + PLAYER_WIDTH > obs.x && px < obs.x + obs.width &&
           py + PLAYER_HEIGHT > obs.y && py < obs.y + obs.height && Date.now() > invulnerableUntil.current) {
-        handlePlayerHit();
+        if (doesShieldCatchRect(obs.x, obs.y, obs.width, obs.height, 12)) {
+          const obsCenterX = obs.x + obs.width / 2;
+          const obsCenterY = obs.y + obs.height / 2;
+          const dx = playerCenterX - obsCenterX;
+          const dy = playerCenterY - obsCenterY;
+          const pushDist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+          playerVel.current.x += (dx / pushDist) * 4;
+          playerVel.current.y += (dy / pushDist) * 4;
+          if (obs.type !== 'WALL') {
+            obs.hp -= 2;
+            if (obs.hp <= 0) {
+              audio.playExplosion(obs.x + obs.width / 2);
+              createExplosion(obs.x + obs.width / 2, obs.y + obs.height / 2, obs.color, 20);
+              setScore(s => s + 200);
+            }
+          }
+          emitSlingshotShieldImpact(obsCenterX, obsCenterY, 1.2);
+          overdriveGauge.current = Math.max(0, overdriveGauge.current - 6);
+          setOverdrive(overdriveGauge.current);
+        } else {
+          handlePlayerHit();
+        }
       }
 
       // Collision with wingman
@@ -3111,6 +3283,22 @@ export default function App() {
           // Bounce slightly on impact to feel 'physical'
           playerVel.current.x *= 0.8;
           playerVel.current.y *= 0.8;
+        } else if (doesShieldCatchRect(enemy.x, enemy.y, enemy.width, enemy.height, 10)) {
+          const enemyCenterX = enemy.x + enemy.width / 2;
+          const enemyCenterY = enemy.y + enemy.height / 2;
+          const dx = enemyCenterX - playerCenterX;
+          const dy = enemyCenterY - playerCenterY;
+          const pushDist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+          const pushStrength = enemy.isBoss ? 8 : enemy.isDiving ? 18 : 12;
+          enemy.x += (dx / pushDist) * pushStrength;
+          enemy.y += (dy / pushDist) * pushStrength;
+          if (!enemy.isBoss) {
+            enemy.stunnedUntil = Math.max(enemy.stunnedUntil, frameNow + 180);
+          }
+          emitSlingshotShieldImpact(enemyCenterX, enemyCenterY, enemy.isBoss ? 1.4 : 1);
+          const shieldOdCost = enemy.isBoss ? 20 : 12;
+          overdriveGauge.current = Math.max(0, overdriveGauge.current - shieldOdCost);
+          setOverdrive(overdriveGauge.current);
         } else {
           playerHit = true;
         }
@@ -3118,27 +3306,29 @@ export default function App() {
     }
 
     const eBullets = enemyBullets.current;
-    const isSlingshotGuardActive = Date.now() < slingshotGuardUntil.current;
     for (let i = eBullets.length - 1; i >= 0; i--) {
       const bullet = eBullets[i];
+      const bulletCenterX = bullet.x + 2;
+      const bulletCenterY = bullet.y + 6;
       // Graze Detection for bullets
-      const bdx = (playerPos.current.x + PLAYER_WIDTH / 2) - bullet.x;
-      const bdy = (playerPos.current.y + PLAYER_HEIGHT / 2) - bullet.y;
+      const bdx = (playerPos.current.x + PLAYER_WIDTH / 2) - bulletCenterX;
+      const bdy = (playerPos.current.y + PLAYER_HEIGHT / 2) - bulletCenterY;
       const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
 
       if (bdist < GRAZE_DISTANCE && bdist > 15) {
-        handleGraze(bullet.x, bullet.y);
+        handleGraze(bulletCenterX, bulletCenterY);
       }
 
-      if (bullet.x > px && bullet.x < px + pw &&
-          bullet.y > py && bullet.y < py + ph) {
-        if (isSlingshotGuardActive) {
-          createExplosion(bullet.x, bullet.y, '#00ffcc', 6);
+      if (doesShieldCatchPoint(bulletCenterX, bulletCenterY, 4)) {
+          emitSlingshotShieldImpact(bulletCenterX, bulletCenterY, 0.9);
           overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + 2);
           setOverdrive(overdriveGauge.current);
           eBullets.splice(i, 1);
           continue;
-        }
+      }
+
+      if (bullet.x > px && bullet.x < px + pw &&
+          bullet.y > py && bullet.y < py + ph) {
         playerHit = true;
         eBullets.splice(i, 1);
       }
@@ -4077,6 +4267,28 @@ export default function App() {
         ctx.restore();
       }
 
+      const slingshotShieldState = getSlingshotShieldState(Date.now());
+      if (slingshotShieldState.active) {
+        ctx.save();
+        ctx.rotate(slingshotShieldState.angle - playerTilt.current);
+        ctx.strokeStyle = `rgba(120, 255, 240, ${slingshotShieldState.alpha})`;
+        ctx.lineWidth = slingshotShieldState.thickness;
+        if (!isMobile) {
+          ctx.shadowBlur = 18;
+          ctx.shadowColor = '#00ffcc';
+        }
+        ctx.beginPath();
+        ctx.arc(0, 0, slingshotShieldState.radius, -Math.PI / 2, Math.PI / 2);
+        ctx.stroke();
+
+        ctx.globalAlpha = slingshotShieldState.alpha * 0.3;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, slingshotShieldState.radius + slingshotShieldState.thickness * 0.5, -Math.PI / 2, Math.PI / 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       // Invulnerability Shield Visual
       if (isInvulnerable) {
         ctx.save();
@@ -4768,102 +4980,127 @@ export default function App() {
             const pCenterY = playerPos.current.y + PLAYER_HEIGHT / 2;
             const sCenterX = playerStartPos.current.x + PLAYER_WIDTH / 2;
             const sCenterY = playerStartPos.current.y + PLAYER_HEIGHT / 2;
-
-            // Predicted landing point on the threshold ring (release stop position)
-            if (dist > 5) {
+            const isDefenseOnlyPreview = dist <= SLINGSHOT_DEFENSE_ONLY_MAX_PULL;
+            if (isDefenseOnlyPreview) {
               const pullMag = Math.sqrt(dx * dx + dy * dy) || 1;
-              const pullDirX = -dx / pullMag;
-              const pullDirY = -dy / pullMag;
-              const predictedCenterX = sCenterX + pullDirX * SLINGSHOT_THRESHOLD;
-              const predictedCenterY = sCenterY + pullDirY * SLINGSHOT_THRESHOLD;
+              const pullDirX = dx / pullMag;
+              const pullDirY = dy / pullMag;
+              const guardRatio = Math.min(dist / SLINGSHOT_DEFENSE_ONLY_MAX_PULL, 1);
+              const boundaryX = pCenterX + pullDirX * SLINGSHOT_DEFENSE_ONLY_MAX_PULL;
+              const boundaryY = pCenterY + pullDirY * SLINGSHOT_DEFENSE_ONLY_MAX_PULL;
+              const pullAngle = Math.atan2(pullDirY, pullDirX);
+
+              ctx.save();
+              ctx.strokeStyle = `rgba(0, 255, 204, ${0.22 + guardRatio * 0.22})`;
+              ctx.lineWidth = 2;
+              ctx.setLineDash([8, 8]);
+              ctx.beginPath();
+              ctx.arc(pCenterX, pCenterY, SLINGSHOT_DEFENSE_ONLY_MAX_PULL, pullAngle - 0.8, pullAngle + 0.8);
+              ctx.stroke();
+              ctx.setLineDash([]);
 
               ctx.beginPath();
-              ctx.arc(predictedCenterX, predictedCenterY, 10, 0, Math.PI * 2);
-              ctx.fillStyle = 'rgba(0, 255, 204, 0.22)';
+              ctx.arc(boundaryX, boundaryY, 7 + guardRatio * 3, 0, Math.PI * 2);
+              ctx.fillStyle = `rgba(0, 255, 204, ${0.16 + guardRatio * 0.18})`;
               ctx.fill();
-
-              ctx.beginPath();
-              ctx.arc(predictedCenterX, predictedCenterY, 4, 0, Math.PI * 2);
-              ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-              ctx.fill();
-
-              ctx.beginPath();
-              ctx.moveTo(sCenterX, sCenterY);
-              ctx.lineTo(predictedCenterX, predictedCenterY);
-              ctx.strokeStyle = 'rgba(0, 255, 204, 0.3)';
+              ctx.strokeStyle = `rgba(255, 255, 255, ${0.4 + guardRatio * 0.3})`;
               ctx.lineWidth = 1.5;
               ctx.stroke();
-            }
+              ctx.restore();
+            } else {
+              // Predicted landing point on the threshold ring (release stop position)
+              if (dist > 5) {
+                const pullMag = Math.sqrt(dx * dx + dy * dy) || 1;
+                const pullDirX = -dx / pullMag;
+                const pullDirY = -dy / pullMag;
+                const predictedCenterX = sCenterX + pullDirX * SLINGSHOT_THRESHOLD;
+                const predictedCenterY = sCenterY + pullDirY * SLINGSHOT_THRESHOLD;
 
-            // 1. Tension Visuals
-            const tension = dist / SLINGSHOT_THRESHOLD;
-            const clampedTension = Math.min(tension, 2.5);
-            const isAttackRange = isSlingshotCharged.current && tension > 1.0;
+                ctx.beginPath();
+                ctx.arc(predictedCenterX, predictedCenterY, 10, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(0, 255, 204, 0.22)';
+                ctx.fill();
 
-            let ringColor = `rgba(0, 255, 204, 0.3)`;
-            let lineWidth = 2;
-            let hue = 180;
+                ctx.beginPath();
+                ctx.arc(predictedCenterX, predictedCenterY, 4, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                ctx.fill();
 
-            if (isAttackRange) {
-              hue = 300 + (clampedTension - 1.0) * 60;
-              ringColor = `hsla(${hue}, 100%, 60%, ${0.7 + (clampedTension - 1.0) * 0.3})`;
-              lineWidth = 6 + (clampedTension - 1.0) * 15;
-            } else if (tension > 0.6) {
-              const warningRatio = (tension - 0.6) / 0.4;
-              const r = Math.floor(0 + 255 * warningRatio);
-              const g = Math.floor(255);
-              const b = Math.floor(204 - 204 * warningRatio);
-              ringColor = `rgba(${r}, ${g}, ${b}, ${0.3 + warningRatio * 0.4})`;
-              lineWidth = 2 + warningRatio * 4;
-            }
+                ctx.beginPath();
+                ctx.moveTo(sCenterX, sCenterY);
+                ctx.lineTo(predictedCenterX, predictedCenterY);
+                ctx.strokeStyle = 'rgba(0, 255, 204, 0.3)';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+              }
 
-            // 2. Tether Line (From Ship to Relative Mouse Offset)
-            const handleX = pCenterX + dx;
-            const handleY = pCenterY + dy;
+              // 1. Tension Visuals
+              const tension = dist / SLINGSHOT_THRESHOLD;
+              const clampedTension = Math.min(tension, 2.5);
+              const isAttackRange = isSlingshotCharged.current && tension > 1.0;
 
-            ctx.beginPath();
-            const midX = (pCenterX + handleX) / 2;
-            const midY = (pCenterY + handleY) / 2;
-            const jitterIntensity = isAttackRange ? Math.max(0, (clampedTension - 1.0) * 40) : (tension > 0.8 ? (tension - 0.8) * 5 : 0);
-            const jitter = Math.sin(Date.now() * 0.08) * jitterIntensity;
+              let ringColor = `rgba(0, 255, 204, 0.3)`;
+              let hue = 180;
 
-            ctx.moveTo(pCenterX, pCenterY);
-            ctx.quadraticCurveTo(midX + jitter, midY + jitter, handleX, handleY);
-            ctx.strokeStyle = ringColor;
-            ctx.lineWidth = isAttackRange ? 4 + (clampedTension - 1.0) * 20 : 2.5;
-            ctx.stroke();
+              if (isAttackRange) {
+                hue = 300 + (clampedTension - 1.0) * 60;
+                ringColor = `hsla(${hue}, 100%, 60%, ${0.7 + (clampedTension - 1.0) * 0.3})`;
+              } else if (tension > 0.6) {
+                const warningRatio = (tension - 0.6) / 0.4;
+                const r = Math.floor(0 + 255 * warningRatio);
+                const g = Math.floor(255);
+                const b = Math.floor(204 - 204 * warningRatio);
+                ringColor = `rgba(${r}, ${g}, ${b}, ${0.3 + warningRatio * 0.4})`;
+              }
 
-            // 3. Anchor Core (At Ship Center)
-            ctx.beginPath();
-            ctx.arc(pCenterX, pCenterY, 8, 0, Math.PI * 2);
-            ctx.fillStyle = isAttackRange ? `hsla(${hue}, 100%, 70%, 0.9)` : `rgba(0, 255, 204, 0.8)`;
-            ctx.fill();
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 2;
-            ctx.stroke();
+              // 2. Tether Line (From Ship to Relative Mouse Offset)
+              const handleX = pCenterX + dx;
+              const handleY = pCenterY + dy;
 
-            // 4. Mouse Handle (The "Pull Point" - Relative)
-            ctx.beginPath();
-            ctx.arc(handleX, handleY, 12 + clampedTension * 5, 0, Math.PI * 2);
-            ctx.strokeStyle = ringColor;
-            ctx.lineWidth = 2;
-            ctx.stroke();
-
-            // 5. Inner Core Glow
-            if (isAttackRange) {
               ctx.beginPath();
-              ctx.arc(pCenterX, pCenterY, 5 + clampedTension * 5, 0, Math.PI * 2);
-              ctx.fillStyle = `hsla(${hue}, 100%, 80%, 0.8)`;
-              ctx.fill();
-            }
+              const midX = (pCenterX + handleX) / 2;
+              const midY = (pCenterY + handleY) / 2;
+              const jitterIntensity = isAttackRange ? Math.max(0, (clampedTension - 1.0) * 40) : (tension > 0.8 ? (tension - 0.8) * 5 : 0);
+              const jitter = Math.sin(Date.now() * 0.08) * jitterIntensity;
 
-            // 6. High Tension Sparks
-            const sparkNow = Date.now();
-            if (clampedTension > 1.0 && sparkNow - lastSparkAt.current > 33) {
-              lastSparkAt.current = sparkNow;
-              createExplosion(handleX, handleY, '#ffffff', 1);
-              if (Math.random() > 0.5) {
-                createExplosion(handleX, handleY, `hsla(${hue}, 100%, 70%, 1)`, 1);
+              ctx.moveTo(pCenterX, pCenterY);
+              ctx.quadraticCurveTo(midX + jitter, midY + jitter, handleX, handleY);
+              ctx.strokeStyle = ringColor;
+              ctx.lineWidth = isAttackRange ? 4 + (clampedTension - 1.0) * 20 : 2.5;
+              ctx.stroke();
+
+              // 3. Anchor Core (At Ship Center)
+              ctx.beginPath();
+              ctx.arc(pCenterX, pCenterY, 8, 0, Math.PI * 2);
+              ctx.fillStyle = isAttackRange ? `hsla(${hue}, 100%, 70%, 0.9)` : `rgba(0, 255, 204, 0.8)`;
+              ctx.fill();
+              ctx.strokeStyle = '#ffffff';
+              ctx.lineWidth = 2;
+              ctx.stroke();
+
+              // 4. Mouse Handle (The "Pull Point" - Relative)
+              ctx.beginPath();
+              ctx.arc(handleX, handleY, 12 + clampedTension * 5, 0, Math.PI * 2);
+              ctx.strokeStyle = ringColor;
+              ctx.lineWidth = 2;
+              ctx.stroke();
+
+              // 5. Inner Core Glow
+              if (isAttackRange) {
+                ctx.beginPath();
+                ctx.arc(pCenterX, pCenterY, 5 + clampedTension * 5, 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${hue}, 100%, 80%, 0.8)`;
+                ctx.fill();
+              }
+
+              // 6. High Tension Sparks
+              const sparkNow = Date.now();
+              if (clampedTension > 1.0 && sparkNow - lastSparkAt.current > 33) {
+                lastSparkAt.current = sparkNow;
+                createExplosion(handleX, handleY, '#ffffff', 1);
+                if (Math.random() > 0.5) {
+                  createExplosion(handleX, handleY, `hsla(${hue}, 100%, 70%, 1)`, 1);
+                }
               }
             }
           } else {
