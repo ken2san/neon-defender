@@ -3028,8 +3028,10 @@ export default function App() {
               audio.playEnemyShoot(enemy.x);
             }
           } else if (enemy.bossType === BossType.LASER) {
-            // Rotating Laser Beams
-            enemy.tractorBeamTimer += dt * (1000 / 60) * timeScale.current; // Using this as rotation angle
+            // Final Front laser boss: slower rotation and tighter hit width for fairer reads.
+            const laserRotationSpeed = enemy.phase === 3 ? 0.72 : enemy.phase === 2 ? 0.58 : 0.46;
+            const loadAdjustedRotationSpeed = isCriticalSim ? laserRotationSpeed * 0.72 : isReducedSim ? laserRotationSpeed * 0.84 : laserRotationSpeed;
+            enemy.tractorBeamTimer += dt * (1000 / 60) * timeScale.current * loadAdjustedRotationSpeed;
             const angle = (enemy.tractorBeamTimer / 1000) * Math.PI;
             const laserCount = enemy.phase === 3 ? 4 : 2;
 
@@ -3050,14 +3052,13 @@ export default function App() {
               let diff = Math.abs(playerAngle - laserAngle) % (Math.PI * 2);
               if (diff > Math.PI) diff = Math.PI * 2 - diff;
 
-              // Beam visual width is ~12px core + 30px glow. At distance d, angular width = 42/d rad.
-              // Use 0.15 as a generous threshold so the hit zone matches what the player sees.
-              const hitThreshold = Math.max(0.15, 42 / Math.max(dist, 1));
+              // Keep hit width closer to the visible core so the boss stays readable.
+              const hitThreshold = Math.max(enemy.phase === 3 ? 0.09 : 0.075, 30 / Math.max(dist, 1));
               if (diff < hitThreshold && dist < 1000 && dist > 50) {
                 shake.current = 5;
-                // Damage every 200ms using lastShotTime as a per-beam damage timer
+                // Slightly slower tick to leave room for recovery while crossing a beam.
                 if (!enemy.laserHitTime) enemy.laserHitTime = 0;
-                if (currentTime - enemy.laserHitTime > 200) {
+                if (currentTime - enemy.laserHitTime > 280) {
                   enemy.laserHitTime = currentTime;
                   handlePlayerHit();
                 }
@@ -4853,7 +4854,7 @@ export default function App() {
 
           // Rotating Rings
           const angleOffset = (drawNow / 1000) * Math.PI;
-          const ringCount = isMinimalBossFx ? 1 : isReducedBossFx ? 2 : 3;
+          const ringCount = isMinimalBossFx ? 1 : isReducedBossFx ? 1 : 2;
           for (let i = 0; i < ringCount; i++) {
             ctx.save();
             ctx.rotate(angleOffset * (i + 1) * 0.5);
@@ -4869,9 +4870,9 @@ export default function App() {
             const angle = (enemy.tractorBeamTimer! / 1000) * Math.PI;
             const laserCount = isMinimalBossFx ? 2 : enemy.phase === 3 ? 4 : 2;
             ctx.save();
-            ctx.lineWidth = (isMinimalBossFx ? 7 : 10) + Math.sin(drawNow / 50) * (isMinimalBossFx ? 3 : 5);
-            ctx.strokeStyle = '#00ffff';
-            ctx.shadowBlur = isMinimalBossFx ? 14 : 30;
+            ctx.lineWidth = (isMinimalBossFx ? 5 : isReducedBossFx ? 6.5 : 8) + Math.sin(drawNow / 50) * (isMinimalBossFx ? 2 : isReducedBossFx ? 3 : 4);
+            ctx.strokeStyle = isMinimalBossFx ? 'rgba(0, 255, 255, 0.82)' : isReducedBossFx ? 'rgba(0, 255, 255, 0.9)' : '#00ffff';
+            ctx.shadowBlur = isMinimalBossFx ? 8 : isReducedBossFx ? 14 : 20;
             ctx.shadowColor = '#00ffff';
             for (let i = 0; i < laserCount; i++) {
               const laserAngle = angle + (i * Math.PI * 2 / laserCount);
@@ -5703,9 +5704,14 @@ export default function App() {
       const prevTier = renderLoadTierRef.current;
       let nextTier = prevTier;
       const isChaseStage = currentStage === 4;
+      const isFinalLaserBossActive = enemies.current.some((enemy) => enemy.alive && enemy.isBoss && enemy.bossType === BossType.LASER);
 
-      // Chase stage: more aggressive thresholds (kicker-in earlier)
-      if (isChaseStage) {
+      // Final Front sector 2 boss gets the earliest downgrade because its beam pass is expensive.
+      if (isFinalLaserBossActive) {
+        if (p95Frame > 34) nextTier = 2;
+        else if (p95Frame > 26) nextTier = 1;
+        else if (p95Frame < 20) nextTier = 0;
+      } else if (isChaseStage) {
         if (p95Frame > 42) nextTier = 2;
         else if (p95Frame > 32) nextTier = 1;
         else if (p95Frame < 24) nextTier = 0;
@@ -5718,8 +5724,11 @@ export default function App() {
       renderLoadTierRef.current = nextTier;
 
       let nextSimulationTier = simulationLoadTierRef.current;
-      // Tighter thresholds for simulation tier
-      if (p95Frame > 50) nextSimulationTier = 2;
+      if (isFinalLaserBossActive) {
+        if (p95Frame > 40) nextSimulationTier = 2;
+        else if (p95Frame > 30) nextSimulationTier = 1;
+        else if (p95Frame < 24) nextSimulationTier = 0;
+      } else if (p95Frame > 50) nextSimulationTier = 2;
       else if (p95Frame > 38) nextSimulationTier = 1;
       else if (p95Frame < 28) nextSimulationTier = 0;
       simulationLoadTierRef.current = nextSimulationTier;
