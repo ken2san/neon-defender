@@ -236,6 +236,10 @@ export default function App() {
   const idleFireTimer = useRef<number | null>(null);
   const slingshotAttackUntil = useRef(0);
   const slingshotTravelUntil = useRef(0);
+  // Short-lived guard (~400ms) to block the phantom mousedown macOS sends
+  // after slingshot fires. Kept separate from slingshotAttackUntil so that
+  // legitimate new drag attempts after 400ms are NOT blocked.
+  const slingshotPhantomGuardUntil = useRef(0);
   const slingshotGuardUntil = useRef(0);
   const slingshotGuardCooldownUntil = useRef(0);
   const slingshotShieldAngle = useRef(-Math.PI / 2);
@@ -1113,6 +1117,10 @@ export default function App() {
       pointerTapTimer.current = window.setTimeout(() => {
         pointerTapTimer.current = null;
         if (isMouseDown.current || isTouching.current || showUpgrade || gameState !== 'PLAYING') return;
+        if (slingshotPhantomGuardUntil.current > Date.now()) {
+          currentMousePos.current = { x, y };
+          return;
+        }
 
         isMouseDown.current = true;
         isVirtualDragActive.current = true;
@@ -1518,6 +1526,7 @@ export default function App() {
         const attackDuration = 500 + (totalPower * 700);
         slingshotAttackUntil.current = Date.now() + attackDuration;
         slingshotTravelUntil.current = Date.now() + (isMobile ? (230 + totalPower * 120) : attackDuration);
+        slingshotPhantomGuardUntil.current = Date.now() + 400;
         invulnerableUntil.current = Date.now() + (attackDuration * 0.7);
         tryActivateSlingshotGuard(SLINGSHOT_GUARD_LARGE_MS);
 
@@ -1633,6 +1642,16 @@ export default function App() {
           createExplosion(x, y, '#00ffcc', 20);
           timeScale.current = 0.2;
           setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 100);
+          return;
+        }
+
+        // Block the phantom mousedown macOS sends ~192ms after slingshot fires.
+        // Use slingshotPhantomGuardUntil (400ms) rather than the full attack
+        // window so legitimate new drags after 400ms are not blocked.
+        if (slingshotPhantomGuardUntil.current > now) {
+          const x = ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
+          const y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
+          currentMousePos.current = { x, y };
           return;
         }
 
