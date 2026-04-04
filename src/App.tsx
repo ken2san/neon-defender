@@ -2965,7 +2965,7 @@ export default function App() {
         const wDist = Math.sqrt(wdx * wdx + wdy * wdy);
         if (wDist < armLen + PLAYER_WIDTH * 0.4 && wDist > 6) {
           const playerAngle = Math.atan2(wdy, wdx);
-          const rot = frameNow * 0.00015 + (block.id % 100) * 0.9;
+          const rot = frameNow * 0.00025 + (block.id % 100) * 0.9;
           for (let k = 0; k < 2; k++) {
             const bladeAngle = rot + k * Math.PI;
             const diff = Math.abs(normalizeAngle(playerAngle - bladeAngle));
@@ -3010,7 +3010,7 @@ export default function App() {
         const wbcx = block.x + block.width / 2;
         const wbcy = block.y + block.height / 2;
         const wbArm = block.height * 2.9;
-        const wbRot = frameNow * 0.00015 + (block.id % 100) * 0.9;
+        const wbRot = frameNow * 0.00025 + (block.id % 100) * 0.9;
         const hitsWindmillBlade = (bx: number, by: number) => {
           const ddx = bx - wbcx;
           const ddy = by - wbcy;
@@ -4733,7 +4733,7 @@ export default function App() {
 
       // Keep spawning enemies if visible threats are low.
       // Off-screen looping enemies should not block fresh spawns.
-      const maxEnemies = isAsteroidBelt ? (isMobile ? 4 : 5) : 8;
+      const maxEnemies = isAsteroidBelt ? (isMobile ? 4 : 5) : currentStage === 3 ? 4 : 8;
       const visibleEnemyCount = enemies.current.filter((e) =>
         e.alive &&
         !e.isBoss &&
@@ -5375,7 +5375,7 @@ export default function App() {
         const wcy = block.height / 2;
         // Arms extend well beyond block edges to act as a corridor hazard.
         const armLen = block.height * 2.9;
-        const rot = drawNow * 0.00015 + (block.id % 100) * 0.9;
+        const rot = drawNow * 0.00025 + (block.id % 100) * 0.9;
         ctx.shadowBlur = 10;
         ctx.shadowColor = '#00ffaa';
         ctx.strokeStyle = '#00ffaa';
