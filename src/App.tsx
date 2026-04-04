@@ -801,26 +801,30 @@ export default function App() {
       // Stage 3 "Heavy Fire": structured turret/windmill formations on indestructible walls.
       // No destructibles — difficulty comes from navigating formations + turret fire.
       type Slot = null | 'WALL' | 'TURRET_BLOCK' | 'WINDMILL';
-      const layouts: Slot[][] = [
-        // Sparse layouts — windmill timing hazard + occasional turret.
-        // Each row has at most 2 fills. Breather rows weighted 3x for pacing.
-
+      // Windmill arm length is 132px; rows are 100px apart vertically.
+      // Any windmill in the previous row would overlap blades with any windmill in this row.
+      // Prevent back-to-back windmill rows by checking recently scrolled blocks (prev row ≈ y=0).
+      const recentWindmill = blocks.current.some(b => b.type === 'WINDMILL' && b.y > -5 && b.y < 25);
+      const windmillLayouts: Slot[][] = [
         // Single windmill — left-centre
         [null, null, 'WINDMILL', null, null, null, null, null, null, null],
         // Single windmill — right-centre
         [null, null, null, null, null, null, null, 'WINDMILL', null, null],
-        // Two windmills — player must time a path through one gap
+        // Two windmills — cols 2 & 7 (300px apart > 264px combined arms)
         [null, null, 'WINDMILL', null, null, null, null, 'WINDMILL', null, null],
-        // Single turret — centre
-        [null, null, null, null, null, 'TURRET_BLOCK', null, null, null, null],
         // Windmill + offset turret — different halves
         [null, 'WINDMILL', null, null, null, null, null, null, 'TURRET_BLOCK', null],
+      ];
+      const quietLayouts: Slot[][] = [
+        // Single turret — centre
+        [null, null, null, null, null, 'TURRET_BLOCK', null, null, null, null],
         // Breather rows (3x weight for generous breathing room)
         [null, null, null, null, null, null, null, null, null, null],
         [null, null, null, null, null, null, null, null, null, null],
         [null, null, null, null, null, null, null, null, null, null],
       ];
-      const layout = layouts[Math.floor(Math.random() * layouts.length)];
+      const pool = recentWindmill ? quietLayouts : [...windmillLayouts, ...quietLayouts];
+      const layout = pool[Math.floor(Math.random() * pool.length)];
       for (let i = 0; i < 10; i++) {
         const slotType = layout[i];
         if (!slotType) continue;
@@ -3008,8 +3012,12 @@ export default function App() {
         const dy = ty - cy;
         const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
         const speed = 3;
+        // Spawn bullet at barrel tip (matches render: tr + 14px from center)
+        const tr = Math.min(block.width, block.height) * 0.26;
+        const barrelTip = tr + 14;
         enemyBullets.current.push({
-          x: cx, y: cy,
+          x: cx + (dx / dist) * barrelTip,
+          y: cy + (dy / dist) * barrelTip,
           vx: (dx / dist) * speed,
           vy: (dy / dist) * speed,
           damage: 20,
