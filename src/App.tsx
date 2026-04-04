@@ -2849,6 +2849,26 @@ export default function App() {
       isSnapping.current = Math.max(isSnapping.current, 5);
     };
 
+    // Slingshot bullet wake: push nearby enemy bullets outward while the player is in flight.
+    // Bullets are deflected (not destroyed) — they scatter sideways, creating visible lanes.
+    if (isSlingshotAttacking) {
+      const wakeRadius = 72;
+      enemyBullets.current.forEach(b => {
+        const wdx = b.x - playerCenterX;
+        const wdy = b.y - playerCenterY;
+        const wDist = Math.sqrt(wdx * wdx + wdy * wdy);
+        if (wDist < wakeRadius && wDist > 0) {
+          const falloff = 1 - wDist / wakeRadius;
+          const force = 9 * falloff;
+          b.vx = (b.vx || 0) + (wdx / wDist) * force;
+          b.vy = (b.vy || 0) + (wdy / wDist) * force;
+          // Clamp pushed bullets to a sane speed so they don't fly off instantly
+          const spd = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+          if (spd > 7) { b.vx = (b.vx / spd) * 7; b.vy = (b.vy / spd) * 7; }
+        }
+      });
+    }
+
     // Maze Generation (Canyon)
     const scrollSpeed = (currentStage === 3 ? 0.65 : 3) * worldSpeedScale;
     lastBlockRowY.current += scrollSpeed;
@@ -3030,6 +3050,25 @@ export default function App() {
     // TURRET_BLOCK shooting: aim and fire at player
     {
       const now = Date.now();
+
+      // Slingshot stagger: passing close to a turret during attack disrupts it for 3s.
+      // The player discovers they can fly past turrets to suppress fire without destroying them.
+      if (isSlingshotAttacking) {
+        const staggerRadius = 90;
+        blocks.current.forEach(block => {
+          if (block.type !== 'TURRET_BLOCK' || block.hp <= 0) return;
+          const cx = block.x + block.width / 2;
+          const cy = block.y + block.height / 2;
+          const sdx = playerCenterX - cx;
+          const sdy = playerCenterY - cy;
+          if (Math.sqrt(sdx * sdx + sdy * sdy) < staggerRadius) {
+            // Push lastShotTime forward so it can't fire for 3 extra seconds
+            block.lastShotTime = Math.max(block.lastShotTime ?? 0, now + 3000);
+            createExplosion(cx, cy, '#ff9900', 3);
+          }
+        });
+      }
+
       blocks.current.forEach(block => {
         if (block.type !== 'TURRET_BLOCK' || block.hp <= 0) return;
         if (block.y < -block.height || block.y > CANVAS_HEIGHT) return;
