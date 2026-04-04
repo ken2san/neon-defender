@@ -2849,7 +2849,7 @@ export default function App() {
     };
 
     // Maze Generation (Canyon)
-    const scrollSpeed = (currentStage === 3 ? 1.5 : 3) * worldSpeedScale;
+    const scrollSpeed = (currentStage === 3 ? 1.0 : 3) * worldSpeedScale;
     lastBlockRowY.current += scrollSpeed;
     if (lastBlockRowY.current > 100) {
       lastBlockRowY.current = 0;
@@ -2966,11 +2966,11 @@ export default function App() {
           const wDist = Math.sqrt(wdx * wdx + wdy * wdy);
           if (wDist < armLen + PLAYER_WIDTH * 0.4 && wDist > 6) {
             const playerAngle = Math.atan2(wdy, wdx);
-            const rot = frameNow * 0.00020 + (block.id % 100) * 0.9;
+            const rot = frameNow * 0.00015 + (block.id % 100) * 0.9;
             for (let k = 0; k < 4; k++) {
               const bladeAngle = rot + (k * Math.PI) / 2;
               const diff = Math.abs(normalizeAngle(playerAngle - bladeAngle));
-              if (diff < 0.22) {
+              if (diff < 0.17) {
                 handlePlayerHit();
                 break;
               }
@@ -3001,7 +3001,7 @@ export default function App() {
         const wbcx = block.x + block.width / 2;
         const wbcy = block.y + block.height / 2;
         const wbArm = block.height * 2.9;
-        const wbRot = frameNow * 0.00020 + (block.id % 100) * 0.9;
+        const wbRot = frameNow * 0.00015 + (block.id % 100) * 0.9;
         const hitsWindmillBlade = (bx: number, by: number) => {
           const ddx = bx - wbcx;
           const ddy = by - wbcy;
@@ -5366,7 +5366,7 @@ export default function App() {
         const wcy = block.height / 2;
         // Arms extend well beyond block edges to act as a corridor hazard.
         const armLen = block.height * 2.9;
-        const rot = drawNow * 0.00020 + (block.id % 100) * 0.9;
+        const rot = drawNow * 0.00015 + (block.id % 100) * 0.9;
         ctx.shadowBlur = 10;
         ctx.shadowColor = '#00ffaa';
         ctx.strokeStyle = '#00ffaa';
