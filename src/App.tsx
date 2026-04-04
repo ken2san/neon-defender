@@ -835,8 +835,8 @@ export default function App() {
           width: blockWidth,
           height: blockHeight,
           type: slotType,
-          hp: 999,
-          maxHp: 999,
+          hp: slotType === 'TURRET_BLOCK' ? 5 : 999,
+          maxHp: slotType === 'TURRET_BLOCK' ? 5 : 999,
           color: slotType === 'WINDMILL' ? '#00ffaa' : slotType === 'TURRET_BLOCK' ? '#ff9900' : '#1a1a2e',
           lastShotTime: 0,
         });
@@ -2893,7 +2893,7 @@ export default function App() {
         : null;
 
       if (block.hp > 0 && isSlingshotAttacking && blockImpact) {
-        if (block.type === 'WALL' || block.type === 'TURRET_BLOCK' || block.type === 'WINDMILL') {
+        if (block.type === 'WALL' || block.type === 'WINDMILL') {
           applySlingshotWallBounce(blockImpact, 1.15);
         } else {
           applySlingshotObstacleKick(blockImpact, 1.25, 1.8, () => {
@@ -2914,12 +2914,12 @@ export default function App() {
           } else {
             applyShieldObstacleRecoil(
               shieldCollision,
-              (block.type === 'WALL' || block.type === 'TURRET_BLOCK' || block.type === 'WINDMILL') ? SLINGSHOT_SHIELD_WALL_RECOIL : SLINGSHOT_SHIELD_OBSTACLE_RECOIL,
+              (block.type === 'WALL' || block.type === 'WINDMILL') ? SLINGSHOT_SHIELD_WALL_RECOIL : SLINGSHOT_SHIELD_OBSTACLE_RECOIL,
               1.1,
               6,
             );
           }
-          if (block.type !== 'WALL' && block.type !== 'TURRET_BLOCK' && block.type !== 'WINDMILL') {
+          if (block.type !== 'WALL' && block.type !== 'WINDMILL') {
             block.hp -= 1;
             if (block.hp <= 0) {
               triggerChainExplosion(block);
@@ -2936,7 +2936,7 @@ export default function App() {
             }
             playerVel.current.x += (shieldCollision.dx / shieldCollision.dist) * 4;
             playerVel.current.y += (shieldCollision.dy / shieldCollision.dist) * 4;
-            if (block.type !== 'WALL' && block.type !== 'TURRET_BLOCK' && block.type !== 'WINDMILL') {
+            if (block.type !== 'WALL' && block.type !== 'WINDMILL') {
               block.hp -= 1;
               if (block.hp <= 0) {
                 triggerChainExplosion(block);
@@ -2993,14 +2993,14 @@ export default function App() {
         if (block.hp > 0 &&
             bullet.x > block.x && bullet.x < block.x + block.width &&
             bullet.y > block.y && bullet.y < block.y + block.height) {
-          if (block.type !== 'WALL' && block.type !== 'TURRET_BLOCK' && block.type !== 'WINDMILL') {
+          if (block.type !== 'WALL' && block.type !== 'WINDMILL') {
             block.hp -= (bullet.damage || 1);
             bullet.y = -100;
             if (block.hp <= 0) {
               triggerChainExplosion(block);
             }
           } else if (block.type !== 'WINDMILL') {
-            bullet.y = -100; // Indestructible block (WALL/TURRET_BLOCK)
+            bullet.y = -100; // Indestructible block (WALL)
           }
           // WINDMILL body is transparent to bullets; blade arc check below.
         }
