@@ -798,9 +798,42 @@ export default function App() {
     let tentacleChance = 0; // Stage 2: no tentacles — keep difficulty manageable
 
     if (currentStage === 3) {
-      wallDensity = 0.04;
-      destructibleDensity = 0.08;
-      tentacleChance = 0.03;
+      // Stage 3 "Heavy Fire": structured turret/windmill formations on indestructible walls.
+      // No destructibles — difficulty comes from navigating formations + turret fire.
+      type Slot = null | 'WALL' | 'TURRET_BLOCK' | 'WINDMILL';
+      const layouts: Slot[][] = [
+        // Flanking turrets
+        [null, 'WALL', 'TURRET_BLOCK', 'WALL', null, null, 'WALL', 'TURRET_BLOCK', 'WALL', null],
+        // Windmill gate
+        [null, null, 'WINDMILL', null, 'WALL', 'WALL', null, 'WINDMILL', null, null],
+        // Dense sides, turrets in middle
+        ['WALL', 'WALL', null, 'TURRET_BLOCK', null, null, 'TURRET_BLOCK', null, 'WALL', 'WALL'],
+        // Asymmetric windmill + turret
+        [null, 'WINDMILL', null, 'WALL', 'TURRET_BLOCK', null, 'WALL', null, null, null],
+        // Breather rows (weighted 2x)
+        [null, null, null, null, null, null, null, null, null, null],
+        [null, null, null, null, null, null, null, null, null, null],
+        // One-sided cluster
+        [null, null, 'WALL', 'WINDMILL', 'WALL', null, null, null, null, null],
+      ];
+      const layout = layouts[Math.floor(Math.random() * layouts.length)];
+      for (let i = 0; i < 10; i++) {
+        const slotType = layout[i];
+        if (!slotType) continue;
+        blocks.current.push({
+          id: Date.now() + i,
+          x: i * blockWidth,
+          y: rowY,
+          width: blockWidth,
+          height: blockHeight,
+          type: slotType,
+          hp: 999,
+          maxHp: 999,
+          color: slotType === 'WINDMILL' ? '#00ffaa' : slotType === 'TURRET_BLOCK' ? '#ff9900' : '#1a1a2e',
+          lastShotTime: 0,
+        });
+      }
+      return;
     } else if (currentStage >= 4) {
       wallDensity = 0.06 + (waveRef.current - 7) * 0.02;
       destructibleDensity = 0.12 + (waveRef.current - 7) * 0.03;
@@ -2842,7 +2875,7 @@ export default function App() {
         : null;
 
       if (block.hp > 0 && isSlingshotAttacking && blockImpact) {
-        if (block.type === 'WALL') {
+        if (block.type === 'WALL' || block.type === 'TURRET_BLOCK' || block.type === 'WINDMILL') {
           applySlingshotWallBounce(blockImpact, 1.15);
         } else {
           applySlingshotObstacleKick(blockImpact, 1.25, 1.8, () => {
@@ -2863,12 +2896,12 @@ export default function App() {
           } else {
             applyShieldObstacleRecoil(
               shieldCollision,
-              block.type === 'WALL' ? SLINGSHOT_SHIELD_WALL_RECOIL : SLINGSHOT_SHIELD_OBSTACLE_RECOIL,
+              (block.type === 'WALL' || block.type === 'TURRET_BLOCK' || block.type === 'WINDMILL') ? SLINGSHOT_SHIELD_WALL_RECOIL : SLINGSHOT_SHIELD_OBSTACLE_RECOIL,
               1.1,
               6,
             );
           }
-          if (block.type !== 'WALL') {
+          if (block.type !== 'WALL' && block.type !== 'TURRET_BLOCK' && block.type !== 'WINDMILL') {
             block.hp -= 1;
             if (block.hp <= 0) {
               triggerChainExplosion(block);
@@ -2882,7 +2915,7 @@ export default function App() {
             }
             playerVel.current.x += (shieldCollision.dx / shieldCollision.dist) * 4;
             playerVel.current.y += (shieldCollision.dy / shieldCollision.dist) * 4;
-            if (block.type !== 'WALL') {
+            if (block.type !== 'WALL' && block.type !== 'TURRET_BLOCK' && block.type !== 'WINDMILL') {
               block.hp -= 1;
               if (block.hp <= 0) {
                 triggerChainExplosion(block);
@@ -2904,18 +2937,45 @@ export default function App() {
         if (block.hp > 0 &&
             bullet.x > block.x && bullet.x < block.x + block.width &&
             bullet.y > block.y && bullet.y < block.y + block.height) {
-          if (block.type !== 'WALL') {
+          if (block.type !== 'WALL' && block.type !== 'TURRET_BLOCK' && block.type !== 'WINDMILL') {
             block.hp -= (bullet.damage || 1);
             bullet.y = -100;
             if (block.hp <= 0) {
               triggerChainExplosion(block);
             }
           } else {
-            bullet.y = -100; // Wall is indestructible
+            bullet.y = -100; // Indestructible block
           }
         }
       });
     });
+    // TURRET_BLOCK shooting: aim and fire at player
+    {
+      const now = Date.now();
+      blocks.current.forEach(block => {
+        if (block.type !== 'TURRET_BLOCK' || block.hp <= 0) return;
+        if (block.y < -block.height || block.y > CANVAS_HEIGHT) return;
+        if (now - (block.lastShotTime ?? 0) < 2500) return;
+        block.lastShotTime = now;
+        const cx = block.x + block.width / 2;
+        const cy = block.y + block.height / 2;
+        const tx = playerPos.current.x + PLAYER_WIDTH / 2;
+        const ty = playerPos.current.y + PLAYER_HEIGHT / 2;
+        const dx = tx - cx;
+        const dy = ty - cy;
+        const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+        const speed = 3;
+        enemyBullets.current.push({
+          x: cx, y: cy,
+          vx: (dx / dist) * speed,
+          vy: (dy / dist) * speed,
+          damage: 20,
+          color: '#ff9900',
+          size: 5,
+        });
+      });
+    }
+
     blocks.current = blocks.current.filter(b => b.y < CANVAS_HEIGHT + 100);
 
     asteroids.current.forEach(a => {
@@ -3912,7 +3972,7 @@ export default function App() {
             enemy.y + enemy.height <= block.y || enemy.y >= block.y + block.height
           ) continue;
 
-          if (block.type === 'WALL') {
+          if (block.type === 'WALL' || block.type === 'TURRET_BLOCK' || block.type === 'WINDMILL') {
             // Push enemy out horizontally; persist via diveStartX so the next
             // frame's movement formula doesn't immediately snap them back.
             const overlapL = (enemy.x + enemy.width) - block.x;
@@ -5184,6 +5244,73 @@ export default function App() {
         ctx.fillStyle = isFinalFrontStage ? 'rgba(18, 24, 52, 0.92)' : 'rgba(26, 26, 46, 0.8)';
         ctx.fillRect(0, 0, block.width, block.height);
         ctx.strokeRect(0, 0, block.width, block.height);
+      } else if (block.type === 'TURRET_BLOCK') {
+        // Wall base
+        ctx.fillStyle = 'rgba(26, 20, 10, 0.88)';
+        ctx.fillRect(0, 0, block.width, block.height);
+        ctx.strokeStyle = '#ff9900';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(0, 0, block.width, block.height);
+        // Turret octagon
+        const tcx = block.width / 2;
+        const tcy = block.height / 2;
+        const tr = Math.min(block.width, block.height) * 0.26;
+        ctx.shadowBlur = 14;
+        ctx.shadowColor = '#ff9900';
+        ctx.strokeStyle = '#ff9900';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let k = 0; k < 8; k++) {
+          const a = (k * Math.PI * 2) / 8 - Math.PI / 8;
+          if (k === 0) ctx.moveTo(tcx + Math.cos(a) * tr, tcy + Math.sin(a) * tr);
+          else ctx.lineTo(tcx + Math.cos(a) * tr, tcy + Math.sin(a) * tr);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        // Gun barrel aimed at player
+        const tAngle = Math.atan2(
+          playerPos.current.y + PLAYER_HEIGHT / 2 - (block.y + tcy),
+          playerPos.current.x + PLAYER_WIDTH / 2 - (block.x + tcx),
+        );
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(tcx, tcy);
+        ctx.lineTo(tcx + Math.cos(tAngle) * (tr + 14), tcy + Math.sin(tAngle) * (tr + 14));
+        ctx.stroke();
+        ctx.fillStyle = '#ffcc44';
+        ctx.beginPath();
+        ctx.arc(tcx + Math.cos(tAngle) * (tr + 14), tcy + Math.sin(tAngle) * (tr + 14), 3, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (block.type === 'WINDMILL') {
+        // Wall base
+        ctx.fillStyle = 'rgba(0, 30, 20, 0.88)';
+        ctx.fillRect(0, 0, block.width, block.height);
+        ctx.strokeStyle = '#00ffaa';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(0, 0, block.width, block.height);
+        // Rotating blades
+        const wcx = block.width / 2;
+        const wcy = block.height / 2;
+        const armLen = Math.min(block.width, block.height) * 0.36;
+        const rot = drawNow * 0.00055 + (block.id % 100) * 0.9;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#00ffaa';
+        ctx.strokeStyle = '#00ffaa';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        for (let k = 0; k < 4; k++) {
+          const a = rot + (k * Math.PI) / 2;
+          ctx.beginPath();
+          ctx.moveTo(wcx, wcy);
+          ctx.lineTo(wcx + Math.cos(a) * armLen, wcy + Math.sin(a) * armLen);
+          ctx.stroke();
+        }
+        ctx.fillStyle = '#00ffaa';
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.arc(wcx, wcy, 5, 0, Math.PI * 2);
+        ctx.fill();
       } else if (block.type === 'TENTACLE' && block.segments) {
         // Draw Tentacle Segments (R-Type style)
         ctx.lineWidth = 4;

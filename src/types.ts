@@ -129,10 +129,11 @@ export interface Obstacle {
   y: number;
   width: number;
   height: number;
-  type: 'BUILDING' | 'WALL' | 'PILLAR' | 'TENTACLE';
+  type: 'BUILDING' | 'WALL' | 'PILLAR' | 'TENTACLE' | 'TURRET_BLOCK' | 'WINDMILL';
   hp: number;
   maxHp: number;
   color: string;
+  lastShotTime?: number;
   segments?: { x: number, y: number, angle: number }[];
   baseX?: number;
 }
