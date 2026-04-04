@@ -785,8 +785,8 @@ export default function App() {
 
   const generateMazeRow = () => {
     const currentStage = getStageFromWave(waveRef.current);
-    // Introduce maze blocks earlier (Stage 2) but keep it sparse initially
-    if (currentStage < 2) return;
+    // Maze blocks start at Stage 3; Stage 2 is obstacle-free
+    if (currentStage < 3) return;
 
     const rowY = -100;
     const blockWidth = CANVAS_WIDTH / 10;
@@ -795,7 +795,7 @@ export default function App() {
     // Density increases with stage and wave
     let wallDensity = 0.02;
     let destructibleDensity = 0.05;
-    let tentacleChance = 0.01;
+    let tentacleChance = 0; // Stage 2: no tentacles — keep difficulty manageable
 
     if (currentStage === 3) {
       wallDensity = 0.04;
@@ -3897,6 +3897,37 @@ export default function App() {
         }
       });
     });
+
+    // Enemy-block collision pass: enemies are deflected by WALLs and destroy
+    // destructible blocks on contact (same as the player, but enemies don't
+    // take damage from blocks). Only run when maze blocks are present.
+    if (blocks.current.length > 0) {
+      enemies.current.forEach((enemy) => {
+        if (!enemy.alive || enemy.isBoss || enemy.state === 'ENTERING') return;
+
+        for (const block of blocks.current) {
+          if (block.hp <= 0) continue;
+          if (
+            enemy.x + enemy.width <= block.x || enemy.x >= block.x + block.width ||
+            enemy.y + enemy.height <= block.y || enemy.y >= block.y + block.height
+          ) continue;
+
+          if (block.type === 'WALL') {
+            // Push enemy out horizontally; persist via diveStartX so the next
+            // frame's movement formula doesn't immediately snap them back.
+            const overlapL = (enemy.x + enemy.width) - block.x;
+            const overlapR = (block.x + block.width) - enemy.x;
+            const push = overlapL < overlapR ? -overlapL : overlapR;
+            enemy.x += push;
+            if (enemy.diveStartX != null) enemy.diveStartX += push;
+          } else if (block.type !== 'TENTACLE') {
+            // Enemy rams through destructible blocks, destroying them.
+            block.hp = 0;
+            triggerChainExplosion(block);
+          }
+        }
+      });
+    }
 
     // Formation dive
     const currentDiveTime = Date.now();
