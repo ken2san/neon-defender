@@ -134,6 +134,7 @@ export interface Obstacle {
   maxHp: number;
   color: string;
   lastShotTime?: number;
+  lastCenterBonus?: number;
   segments?: { x: number, y: number, angle: number }[];
   baseX?: number;
 }

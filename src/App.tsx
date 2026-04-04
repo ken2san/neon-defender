@@ -2951,31 +2951,40 @@ export default function App() {
             handlePlayerHit();
           }
         }
+      }
 
-        // Windmill blade timing hazard — hit when a blade sweeps through player position.
-        // Each of the 4 blades has a +-0.22 rad (~12.5°) danger arc at arm length.
-        if (block.type === 'WINDMILL' && block.hp > 0 &&
-            !isOverdriveActiveRef.current && frameNow > invulnerableUntil.current) {
-          const wcx = block.x + block.width / 2;
-          const wcy = block.y + block.height / 2;
-          const armLen = block.height * 2.9;
-          const pCx = playerPos.current.x + PLAYER_WIDTH / 2;
-          const pCy = playerPos.current.y + PLAYER_HEIGHT / 2;
-          const wdx = pCx - wcx;
-          const wdy = pCy - wcy;
-          const wDist = Math.sqrt(wdx * wdx + wdy * wdy);
-          if (wDist < armLen + PLAYER_WIDTH * 0.4 && wDist > 6) {
-            const playerAngle = Math.atan2(wdy, wdx);
-            const rot = frameNow * 0.00015 + (block.id % 100) * 0.9;
-            for (let k = 0; k < 4; k++) {
-              const bladeAngle = rot + (k * Math.PI) / 2;
-              const diff = Math.abs(normalizeAngle(playerAngle - bladeAngle));
-              if (diff < 0.17) {
+      // Windmill blade timing hazard — runs for all player states, including slingshot attack.
+      if (block.type === 'WINDMILL' && block.hp > 0 && !isOverdriveActiveRef.current) {
+        const wcx = block.x + block.width / 2;
+        const wcy = block.y + block.height / 2;
+        const armLen = block.height * 2.9;
+        const pCx = playerPos.current.x + PLAYER_WIDTH / 2;
+        const pCy = playerPos.current.y + PLAYER_HEIGHT / 2;
+        const wdx = pCx - wcx;
+        const wdy = pCy - wcy;
+        const wDist = Math.sqrt(wdx * wdx + wdy * wdy);
+        if (wDist < armLen + PLAYER_WIDTH * 0.4 && wDist > 6) {
+          const playerAngle = Math.atan2(wdy, wdx);
+          const rot = frameNow * 0.00015 + (block.id % 100) * 0.9;
+          for (let k = 0; k < 4; k++) {
+            const bladeAngle = rot + (k * Math.PI) / 2;
+            const diff = Math.abs(normalizeAngle(playerAngle - bladeAngle));
+            if (diff < 0.17) {
+              if (isSlingshotAttacking) {
+                applySlingshotWallBounce(getObstacleImpact(block.x, block.y, block.width, block.height), 1.3);
+              } else if (frameNow > invulnerableUntil.current) {
                 handlePlayerHit();
-                break;
               }
+              break;
             }
           }
+        }
+        // Center passage bonus: threading through the hub earns a score flash (+200).
+        if (wDist < 30 && frameNow - (block.lastCenterBonus ?? 0) > 2000) {
+          block.lastCenterBonus = frameNow;
+          setScore(s => s + 200);
+          createExplosion(wcx, wcy, '#ffff00', 6);
+          flash.current = Math.max(flash.current, 0.25);
         }
       }
 
