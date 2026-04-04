@@ -803,9 +803,10 @@ export default function App() {
       type Slot = null | 'WALL' | 'TURRET_BLOCK' | 'WINDMILL';
       // Windmill (armLen=290px) is always centred on the canvas. The blade sweep covers
       // nearly the full width — the player must time passage, not dodge horizontally.
-      // Guard: don't spawn the next windmill until the current one has scrolled past y=500,
-      // giving a longer quiet/turret section between windmills.
-      const recentWindmill = blocks.current.some(b => b.type === 'WINDMILL' && b.y > -5 && b.y < 500);
+      // Guard: only one windmill on screen at a time — wait until the previous one scrolls
+      // off the bottom of the canvas (y >= CANVAS_HEIGHT) before spawning the next.
+      // This ensures blades (armLen=290px each, 580px total) never overlap.
+      const recentWindmill = blocks.current.some(b => b.type === 'WINDMILL' && b.y > -5 && b.y < CANVAS_HEIGHT);
       const windmillLayouts: Slot[][] = [
         // Single windmill — always centred (x is overridden in the push below)
         [null, null, null, null, null, 'WINDMILL', null, null, null, null],
