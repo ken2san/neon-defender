@@ -547,12 +547,6 @@ export default function App() {
     setXp(xpRef.current);
     setXpToNextLevel(xpToNextLevelRef.current);
 
-    // Give Overdrive fuel on scrap collection
-    if (!isOverdriveActiveRef.current) {
-      overdriveGauge.current = Math.min(100, overdriveGauge.current + 2);
-      setOverdrive(overdriveGauge.current);
-    }
-
     if (progress.didLevelUp) {
       triggerLevelUp();
     }
@@ -1979,12 +1973,6 @@ export default function App() {
       audio.playGraze();
       grazeCount.current++;
       setScore(s => s + 10);
-
-      // Boost overdrive
-      if (!isOverdriveActiveRef.current) {
-        overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + 0.5);
-        setOverdrive(overdriveGauge.current);
-      }
 
     // Slow motion effect
     timeScale.current = 0.8;
@@ -4332,12 +4320,6 @@ export default function App() {
                 });
               }
 
-              // Overdrive gauge increase
-              if (!isOverdriveActiveRef.current) {
-                overdriveGauge.current = Math.min(100, overdriveGauge.current + 12);
-                setOverdrive(overdriveGauge.current);
-              }
-
               // Big explosion
               createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ff33cc', 100);
               shake.current = 30;
@@ -4398,14 +4380,6 @@ export default function App() {
           const basePoints = enemy.isDiving ? 250 : 100;
           const comboBonus = Math.floor(basePoints * (comboRef.current - 1) * 0.1);
           setScore((s) => s + basePoints + comboBonus);
-
-          // Overdrive gauge increase
-          if (!isOverdriveActiveRef.current) {
-            const stageGainScale = Math.min(1.25, 1 + waveRef.current * 0.02);
-            const gaugeGain = (enemy.isDiving ? 2.2 : 0.9) * stageGainScale;
-            overdriveGauge.current = Math.min(100, overdriveGauge.current + gaugeGain);
-            setOverdrive(overdriveGauge.current);
-          }
 
           // Emergency repair drop: low chance, cooldown-gated, with low-HP bias.
           if (integrityRef.current < 100) {
