@@ -2661,7 +2661,8 @@ export default function App() {
         setOverdrive(overdriveGauge.current);
       }
     };
-    const isShieldObstacleRecoilPhase = shieldState.active && !isSlingshotAttacking;
+    // Option A: guard window (post-release) always acts as wall; during active drag, wall requires energy.
+    const isShieldObstacleRecoilPhase = shieldState.active && !isSlingshotAttacking && (!isDragging || overdriveGauge.current > 0);
     const getShieldObstacleCollision = (x: number, y: number, width: number, height: number, padding = 0) => {
       if (!shieldState.active) return null;
       const caught = doesShieldCatchRect(x, y, width, height, padding) || doesShieldCatchAtPrev(x, y, width, height, padding);
@@ -5732,11 +5733,14 @@ export default function App() {
         ctx.save();
         ctx.rotate(slingshotShieldState.angle - playerTilt.current);
         const wallCharge = Math.min(1, overdriveGauge.current / MAX_OVERDRIVE);
+        // Empty wall: dragging but no energy — arc is dashed and dimmer (absorbing, no physical wall).
+        const isEmptyWall = (isMouseDown.current || isTouching.current) && overdriveGauge.current <= 0;
         const arcR = Math.round(120 + wallCharge * 135);
         const arcG = Math.round(255 - wallCharge * 55);
         const arcB = Math.round(240 - wallCharge * 240);
-        ctx.strokeStyle = `rgba(${arcR}, ${arcG}, ${arcB}, ${slingshotShieldState.alpha * 0.8})`;
+        ctx.strokeStyle = `rgba(${arcR}, ${arcG}, ${arcB}, ${slingshotShieldState.alpha * (isEmptyWall ? 0.35 : 0.8)})`;
         ctx.lineWidth = Math.max(6, slingshotShieldState.thickness - 2 + wallCharge * 4);
+        if (isEmptyWall) ctx.setLineDash([5, 9]);
         if (!isMobile && renderLoadTierRef.current === 0) {
           ctx.shadowBlur = 8 + wallCharge * 14;
           ctx.shadowColor = wallCharge >= 1 ? '#ffcc00' : '#00ffcc';
