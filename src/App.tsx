@@ -234,6 +234,9 @@ export default function App() {
   const lastInputDebugSnapshotRef = useRef('');
   // Idle-fire: fire slingshot when mousemove stops (finger lifted on trackpad before OS sends mouseup)
   const idleFireTimer = useRef<number | null>(null);
+  // Timestamp of the last idle-fire discharge — used to suppress phantom drag
+  // re-synthesis in mouse-down-missed-detected for 500ms after idle-fire.
+  const lastIdleFireAt = useRef(0);
   const slingshotAttackUntil = useRef(0);
   const slingshotTravelUntil = useRef(0);
   // Short-lived guard (~400ms) to block the phantom mousedown macOS sends
@@ -1761,10 +1764,10 @@ export default function App() {
           const y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
           const now = Date.now();
 
-          // If slingshot is currently in-flight (idleFireTimer fired and cleared isMouseDown),
-          // only track cursor position — re-enabling drag would cause the upcoming mouseup
-          // to call handleSlingshot again and abort the flight via slingshotTravelUntil reset.
-          if (slingshotTravelUntil.current > now || slingshotAttackUntil.current > now) {
+          // If slingshot is currently in-flight OR idle-fire just discharged (<500ms ago),
+          // only track cursor position — re-enabling drag would synthesize a false anchor
+          // that freezes the ship (anchor=cursor → targetPos=playerPos).
+          if (slingshotTravelUntil.current > now || slingshotAttackUntil.current > now || now - lastIdleFireAt.current < 500) {
             currentMousePos.current = { x, y };
           } else {
             isMouseDown.current = true;
@@ -1845,6 +1848,7 @@ export default function App() {
               isVirtualDragActive.current = false;
               isMouseDown.current = false;
               mouseAnchorPos.current = null;
+              lastIdleFireAt.current = Date.now();
             }
             idleFireTimer.current = null;
           }, 80);
