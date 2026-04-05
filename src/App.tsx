@@ -2868,7 +2868,7 @@ export default function App() {
     // absorption triggers Overdrive immediately.
     // Guard window (post-release) intentionally excluded: absorption requires active drag.
     if (shieldState.active && !isSlingshotAttacking && !isOverdriveActiveRef.current && isSlingshotMode.current && isDragging) {
-      const ENERGY_WALL_BULLET_GAIN = 8;
+      const ENERGY_WALL_BULLET_GAIN = 3; // ~34 bullets to full (was 8 = too fast)
       enemyBullets.current = enemyBullets.current.filter(b => {
         if (!doesShieldCatchPoint(b.x, b.y, 20)) return true;
         if (odReadyRef.current) {
