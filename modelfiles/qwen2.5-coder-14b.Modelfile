@@ -1,0 +1,7 @@
+# Modelfile for qwen2.5-coder:14b — optimized for M4 Pro 48GB
+# Usage: ollama create qwen2.5-coder-16k:14b -f modelfiles/qwen2.5-coder-14b.Modelfile
+FROM qwen2.5-coder:14b
+
+# Override model default (32768) to reduce KV cache size
+# q4_0 KV @ 16k = ~1.6GB vs q8_0 KV @ 32k = ~6.5GB
+PARAMETER num_ctx 16384

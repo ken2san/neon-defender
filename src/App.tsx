@@ -1486,6 +1486,14 @@ export default function App() {
         return;
       }
 
+      // Defense and attack are mutually exclusive: block attack while guard is active.
+      // Player must let the guard window expire before firing.
+      if (slingshotGuardUntil.current > Date.now()) {
+        isSlingshotCharged.current = false;
+        isSlingshotMode.current = false;
+        return;
+      }
+
       // Deterministic landing: snap destination is fixed on the threshold ring.
       // This makes the stop point predictable while dragging.
       const landingDistance = getSlingshotLandingDistance(dist);

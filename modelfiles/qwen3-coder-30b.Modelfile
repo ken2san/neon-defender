@@ -1,0 +1,13 @@
+# Modelfile for qwen3-coder:30b — optimized for M4 Pro 48GB
+# Usage: ollama create qwen3-coder-16k:30b -f modelfiles/qwen3-coder-30b.Modelfile
+FROM qwen3-coder:30b
+
+# Override model default to reduce KV cache size
+# q4_0 KV @ 16k = ~3.2GB vs default 32k = larger
+PARAMETER num_ctx 16384
+
+# Keep original inference params
+PARAMETER temperature 0.7
+PARAMETER top_k 20
+PARAMETER top_p 0.8
+PARAMETER repeat_penalty 1.05
