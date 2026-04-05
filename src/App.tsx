@@ -5718,24 +5718,27 @@ export default function App() {
         // Each non-empty stage snaps to a distinct color + thickness for clear readability.
         const charge = overdriveGauge.current;
         const stage = charge <= 0 ? 0 : charge < 25 ? 1 : charge < 50 ? 2 : charge < 75 ? 3 : charge < MAX_OVERDRIVE ? 4 : 5;
-        // Stages 0-1 (gauge < 25): absorbing but wall not yet solid — show dashed.
-        const isEmptyWall = (isMouseDown.current || isTouching.current) && stage < 2;
+        // Stages 0-1 (gauge < 25): wall not yet active — show dashed orange-red.
+        // Covers both active drag and guard window so dashed visual matches gameplay (no deflect).
+        const isDraggingNow = isMouseDown.current || isTouching.current;
+        const isInGuardWindow = !isDraggingNow && Date.now() < slingshotGuardUntil.current;
+        const isEmptyWall = (isDraggingNow || isInGuardWindow) && stage < 2;
         const STAGE_COLORS: [number, number, number][] = [
-          [0,   180, 255],  // 0: empty  — dim cyan
-          [0,   220, 255],  // 1: low    — cyan
-          [0,   255, 200],  // 2: mid    — teal
+          [255,  90,  30],  // 0: empty  — red-orange (no wall, not charging)
+          [255, 160,  40],  // 1: low    — orange (charging, wall not yet active)
+          [0,   255, 200],  // 2: mid    — teal (wall active)
           [80,  255, 140],  // 3: high   — green-teal
           [255, 200,  60],  // 4: near   — amber
           [255, 200,   0],  // 5: full   — gold
         ];
         const STAGE_WIDTHS = [5, 6, 7, 8, 10, 12];
         const [arcR, arcG, arcB] = STAGE_COLORS[stage];
-        ctx.strokeStyle = `rgba(${arcR}, ${arcG}, ${arcB}, ${slingshotShieldState.alpha * (isEmptyWall ? 0.35 : 0.82)})`;
+        ctx.strokeStyle = `rgba(${arcR}, ${arcG}, ${arcB}, ${slingshotShieldState.alpha * (isEmptyWall ? 0.45 : 0.82)})`;
         ctx.lineWidth = STAGE_WIDTHS[stage];
         if (isEmptyWall) ctx.setLineDash([5, 9]);
         if (!isMobile && renderLoadTierRef.current === 0) {
           ctx.shadowBlur = 4 + stage * 5;
-          ctx.shadowColor = stage >= 5 ? '#ffcc00' : stage >= 4 ? '#ffcc44' : '#00ffcc';
+          ctx.shadowColor = stage >= 5 ? '#ffcc00' : stage >= 4 ? '#ffcc44' : stage >= 2 ? '#00ffcc' : '#ff8020';
         }
         ctx.beginPath();
         ctx.arc(0, 0, slingshotShieldState.radius, -Math.PI / 2, Math.PI / 2);
