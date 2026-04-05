@@ -2653,8 +2653,8 @@ export default function App() {
         setOverdrive(overdriveGauge.current);
       }
     };
-    // Option A: guard window (post-release) always acts as wall; during active drag, wall requires Stage 2+ (gauge >= 25).
-    const isShieldObstacleRecoilPhase = shieldState.active && !isSlingshotAttacking && (!isDragging || overdriveGauge.current >= 25);
+    // Wall (enemy/block deflect) always requires Stage 2+ (gauge >= 25), both during drag and guard window.
+    const isShieldObstacleRecoilPhase = shieldState.active && !isSlingshotAttacking && overdriveGauge.current >= 25;
     const getShieldObstacleCollision = (x: number, y: number, width: number, height: number, padding = 0) => {
       if (!shieldState.active) return null;
       const caught = doesShieldCatchRect(x, y, width, height, padding) || doesShieldCatchAtPrev(x, y, width, height, padding);
