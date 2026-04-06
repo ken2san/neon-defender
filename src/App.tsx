@@ -747,11 +747,11 @@ export default function App() {
       case 'EMP': /* Handled in hit logic */ break;
       case 'FRENZY': /* Handled in overdrive logic */ break;
       case 'FOLLOWER':
-        hasFollowerRef.current = true;
-        // Pre-fill history to avoid jump
-        const startX = wingmanRef.current ? wingmanPos.current.x + PLAYER_WIDTH / 2 : playerPos.current.x + PLAYER_WIDTH / 2;
-        const startY = wingmanRef.current ? wingmanPos.current.y + PLAYER_HEIGHT / 2 : playerPos.current.y + PLAYER_HEIGHT / 2;
-        followerHistory.current = Array(200).fill({ x: startX, y: startY });
+        // Disabled: Follower Pods are too expensive on mobile — re-enable when optimized.
+        // hasFollowerRef.current = true;
+        // const startX = wingmanRef.current ? wingmanPos.current.x + PLAYER_WIDTH / 2 : playerPos.current.x + PLAYER_WIDTH / 2;
+        // const startY = wingmanRef.current ? wingmanPos.current.y + PLAYER_HEIGHT / 2 : playerPos.current.y + PLAYER_HEIGHT / 2;
+        // followerHistory.current = Array(200).fill({ x: startX, y: startY });
         break;
       case 'WINGMAN':
         setHasWingman(true);
@@ -2020,12 +2020,26 @@ export default function App() {
   // Game Loop
   const update = () => {
     // Hit stop logic
-    if (Date.now() < hitStopTimer.current) return;
+    const now = Date.now();
+    if (now < hitStopTimer.current) return;
 
     const dt = dtRef.current;
     const simulationTier = simulationLoadTierRef.current;
     const isReducedSim = simulationTier >= 1;
     const isCriticalSim = simulationTier >= 2;
+
+    // Cache frequently used .current arrays for performance
+    const enemiesArr = enemies.current;
+    const bulletsArr = bullets.current;
+    const enemyBulletsArr = enemyBullets.current;
+    const blocksArr = blocks.current;
+    const asteroidsArr = asteroids.current;
+    const particlesArr = particles.current;
+    const powerUpsArr = powerUps.current;
+    const scrapsArr = scraps.current;
+    const dronesArr = drones.current;
+    const trailsArr = trails.current;
+    const damageNumbersArr = damageNumbers.current;
 
     // Warp logic should run even if not in PLAYING state (e.g. STAGE_CLEAR)
     if (isWarping.current) {
@@ -2062,8 +2076,14 @@ export default function App() {
 
     if (gameState !== 'PLAYING' || showUpgrade) return;
 
+    // Cache relic lookups — avoids O(n × relics) cost inside enemy/bullet loops
+    const hasEMP        = relicsRef.current.some(r => r.id === 'EMP');
+    const hasChrono     = relicsRef.current.some(r => r.id === 'CHRONO');
+    const hasFrenzy     = relicsRef.current.some(r => r.id === 'FRENZY');
+    const hasShieldRegen = relicsRef.current.some(r => r.id === 'SHIELD_REGEN');
+
     // Input watchdog: recover from macOS gesture paths that leave drag flags stuck.
-    const watchdogNow = Date.now();
+    const watchdogNow = now;
     if (lastInputActivityAt.current > 0) {
       const idleMs = watchdogNow - lastInputActivityAt.current;
       const staleVirtualDrag = isVirtualDragActive.current && idleMs > INPUT_WATCHDOG_RELEASE_MS;
@@ -2101,11 +2121,18 @@ export default function App() {
     }
 
     // Keep object counts within a soft budget when frame time worsens.
-    if (enemyBullets.current.length > (isCriticalSim ? 140 : isReducedSim ? 200 : 260)) {
-      enemyBullets.current.splice(0, enemyBullets.current.length - (isCriticalSim ? 140 : isReducedSim ? 200 : 260));
+    // Mobile caps are tighter to match MAX_ENEMY_BULLETS / MAX_PARTICLES constants.
+    const enemyBulletCap = isMobile
+      ? (isCriticalSim ? 80  : isReducedSim ? 120 : 150)
+      : (isCriticalSim ? 140 : isReducedSim ? 200 : 260);
+    if (enemyBullets.current.length > enemyBulletCap) {
+      enemyBullets.current.splice(0, enemyBullets.current.length - enemyBulletCap);
     }
-    if (particles.current.length > (isCriticalSim ? 520 : isReducedSim ? 760 : 1000)) {
-      particles.current.splice(0, particles.current.length - (isCriticalSim ? 520 : isReducedSim ? 760 : 1000));
+    const particleCap = isMobile
+      ? (isCriticalSim ? 80  : isReducedSim ? 120 : 150)
+      : (isCriticalSim ? 520 : isReducedSim ? 760 : 1000);
+    if (particles.current.length > particleCap) {
+      particles.current.splice(0, particles.current.length - particleCap);
     }
 
     const isAsteroidBelt = currentStage === 2;
@@ -2124,14 +2151,14 @@ export default function App() {
     }
 
     // SHIELD_REGEN: auto-recharge shield every 20s when consumed
-    if (relicsRef.current.some(r => r.id === 'SHIELD_REGEN')) {
-      const now = Date.now();
-      const shieldActive = activeEffects.current['SHIELD'] > now;
+    if (hasShieldRegen) {
+      const shieldNow = Date.now();
+      const shieldActive = activeEffects.current['SHIELD'] > shieldNow;
       if (!shieldActive) {
         if (!activeEffects.current['SHIELD_RECHARGE']) {
-          activeEffects.current['SHIELD_RECHARGE'] = now + 20000;
-        } else if (now > activeEffects.current['SHIELD_RECHARGE']) {
-          activeEffects.current['SHIELD'] = now + 10000;
+          activeEffects.current['SHIELD_RECHARGE'] = shieldNow + 20000;
+        } else if (shieldNow > activeEffects.current['SHIELD_RECHARGE']) {
+          activeEffects.current['SHIELD'] = shieldNow + 10000;
           activeEffects.current['SHIELD_RECHARGE'] = 0;
         }
       } else {
@@ -2204,8 +2231,8 @@ export default function App() {
 
       // Wingman firing
       if (gameState === 'PLAYING') {
-        const now = Date.now();
-        if (now - lastShotTime.current > (isOverdriveActiveRef.current ? 75 : 150)) {
+        const wingmanNow = Date.now();
+        if (wingmanNow - lastShotTime.current > (isOverdriveActiveRef.current ? 75 : 150)) {
           bullets.current.push({
             x: wingmanPos.current.x + PLAYER_WIDTH / 2 - 2,
             y: wingmanPos.current.y,
@@ -2476,9 +2503,9 @@ export default function App() {
     const isMoving = Math.abs(targetPos.current.x - playerPos.current.x) > 0.1 || Math.abs(targetPos.current.y - playerPos.current.y) > 0.1;
 
     // Add trail
-    const now = Date.now();
-    if (isMoving && now - lastTrailSpawnAt.current > VFX_TRAIL_SPAWN_INTERVAL_MS && trails.current.length < MAX_TRAILS) {
-      lastTrailSpawnAt.current = now;
+    const trailNow = Date.now();
+    if (isMoving && trailNow - lastTrailSpawnAt.current > VFX_TRAIL_SPAWN_INTERVAL_MS && trails.current.length < MAX_TRAILS) {
+      lastTrailSpawnAt.current = trailNow;
       trails.current.push({
         x: playerPos.current.x + PLAYER_WIDTH / 2,
         y: playerPos.current.y + PLAYER_HEIGHT / 2,
@@ -3435,7 +3462,6 @@ export default function App() {
         shake.current = 10;
         audio.playPowerDown(); // Add a sound for ending
       } else {
-        const hasFrenzy = relicsRef.current.some(r => r.id === 'FRENZY');
         const totalDuration = hasFrenzy ? 15000 : 10000;
         const elapsed = totalDuration - (overdriveEndTime.current - now);
         const remainingPercent = Math.max(0, 100 - (elapsed / totalDuration) * 100);
@@ -4072,7 +4098,8 @@ export default function App() {
 
     // Final Separation Pass (Post-movement)
     // This ensures enemies don't overlap even if their formulas try to put them in the same spot
-    enemies.current.forEach((enemy) => {
+    // On mobile, run every other frame — visual difference is imperceptible; saves O(n²) work.
+    if (!isMobile || frameCounterRef.current % 2 === 0) enemies.current.forEach((enemy) => {
       if (!enemy.alive || enemy.state === 'ENTERING' || enemy.isBoss) return;
 
       enemies.current.forEach((other) => {
@@ -4278,7 +4305,7 @@ export default function App() {
           hitStopTimer.current = Date.now() + 33;
 
           // EMP Burst
-          if (relicsRef.current.some(r => r.id === 'EMP') && Math.random() < 0.1) {
+          if (hasEMP && Math.random() < 0.1) {
             enemy.stunnedUntil = Date.now() + 2000;
             createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ff3366', 10);
           }
@@ -4294,7 +4321,7 @@ export default function App() {
               enemy.alive = false;
 
               // Chrono Trigger
-              if (relicsRef.current.some(r => r.id === 'CHRONO') && !isOverdriveActiveRef.current && Math.random() < 0.15) {
+              if (hasChrono && !isOverdriveActiveRef.current && Math.random() < 0.15) {
                 timeScale.current = 0.3;
               }
 
@@ -4354,7 +4381,7 @@ export default function App() {
           }
 
           // Chrono Trigger
-          if (relicsRef.current.some(r => r.id === 'CHRONO') && !isOverdriveActiveRef.current && Math.random() < 0.15) {
+          if (hasChrono && !isOverdriveActiveRef.current && Math.random() < 0.15) {
             timeScale.current = 0.3;
           }
           playerBullets.splice(i, 1);
@@ -6622,6 +6649,14 @@ export default function App() {
 
     const now = Date.now();
     const elapsed = now - lastTimeRef.current;
+
+    // Cap at 60fps on mobile (ProMotion devices fire rAF at 120Hz, doubling CPU/GPU load).
+    // Skip the frame but re-queue immediately — keeps animation smooth without doing double work.
+    if (isMobile && elapsed < 14) {
+      requestRef.current = requestAnimationFrame(loop);
+      return;
+    }
+
     lastTimeRef.current = now;
     const boundedElapsed = Math.max(1, Math.min(1000, elapsed));
     // Normalize to 60fps (16.67ms per frame)
@@ -6666,13 +6701,14 @@ export default function App() {
       renderLoadTierRef.current = nextTier;
 
       let nextSimulationTier = simulationLoadTierRef.current;
+      // Mobile escalates earlier: 30fps (33ms) triggers tier 1, 24fps (42ms) triggers tier 2.
       if (isFinalLaserBossActive) {
-        if (p95Frame > 40) nextSimulationTier = 2;
-        else if (p95Frame > 30) nextSimulationTier = 1;
-        else if (p95Frame < 24) nextSimulationTier = 0;
-      } else if (p95Frame > 50) nextSimulationTier = 2;
-      else if (p95Frame > 38) nextSimulationTier = 1;
-      else if (p95Frame < 28) nextSimulationTier = 0;
+        if (p95Frame > (isMobile ? 35 : 40)) nextSimulationTier = 2;
+        else if (p95Frame > (isMobile ? 28 : 30)) nextSimulationTier = 1;
+        else if (p95Frame < (isMobile ? 22 : 24)) nextSimulationTier = 0;
+      } else if (p95Frame > (isMobile ? 42 : 50)) nextSimulationTier = 2;
+      else if (p95Frame > (isMobile ? 33 : 38)) nextSimulationTier = 1;
+      else if (p95Frame < (isMobile ? 26 : 28)) nextSimulationTier = 0;
       simulationLoadTierRef.current = nextSimulationTier;
 
       setPerfStats({
@@ -6688,6 +6724,13 @@ export default function App() {
     }
 
     if (ctx) {
+      // On mobile, throttle draw-only frames (non-PLAYING states) to ~30fps to save battery.
+      const isIdleState = gameState !== 'PLAYING';
+      if (isMobile && isIdleState && frameCounterRef.current % 2 !== 0) {
+        requestRef.current = requestAnimationFrame(loop);
+        return;
+      }
+
       if (Date.now() < hitStopTimer.current) {
         draw(ctx);
       } else {
