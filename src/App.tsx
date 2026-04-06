@@ -3211,8 +3211,8 @@ export default function App() {
       });
     }
 
-    // BEAM_TURRET: fires a slow charged beam straight down every 3.5s.
-    // The slingshot shield deflects it back — reflecting beam destroys the turret (Stage 4 gimmick).
+    // BEAM_TURRET: fires a slow charged beam aimed at the player every 3.5s.
+    // The slingshot shield deflects it — the reflected beam ricochets off walls and destroys what it hits.
     {
       const now = Date.now();
       blocks.current.forEach(block => {
@@ -3220,29 +3220,63 @@ export default function App() {
         if (block.y < -block.height || block.y > CANVAS_HEIGHT) return;
         if (now - (block.lastShotTime ?? 0) < 3500) return;
         block.lastShotTime = now;
+        const ox = block.x + block.width / 2;
+        const oy = block.y + block.height;
+        const tx = playerPos.current.x + PLAYER_WIDTH / 2;
+        const ty = playerPos.current.y + PLAYER_HEIGHT / 2;
+        const dx = tx - ox;
+        const dy = ty - oy;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const speed = 2.4;
         enemyBullets.current.push({
-          x: block.x + block.width / 2 - 5,
-          y: block.y + block.height,
-          vx: 0,
-          vy: 2.2,
+          x: ox - 5,
+          y: oy,
+          vx: (dx / dist) * speed,
+          vy: (dy / dist) * speed,
           damage: 25,
           color: '#00ffdd',
           size: 9,
           isBeam: true,
+          bounces: 0,
         });
       });
     }
 
-    // Deflected beam vs blocks: a reflected beam (vy < 0) destroys what it hits.
+    // Deflected beam ricochet: bounces off WALL blocks, damages/destroys everything else.
+    // Beams also damage alive enemies on contact.
     for (let bi = enemyBullets.current.length - 1; bi >= 0; bi--) {
       const b = enemyBullets.current[bi];
-      if (!b.deflected || !b.isBeam || (b.vy ?? 0) >= 0) continue;
-      let hitBlock = false;
+      if (!b.deflected || !b.isBeam) continue;
+      const MAX_BEAM_BOUNCES = 7;
+
+      // vs blocks
+      let removeBeam = false;
       for (let ki = 0; ki < blocks.current.length; ki++) {
         const block = blocks.current[ki];
-        if (block.hp <= 0 || block.type === 'WALL') continue;
-        if (b.x > block.x && b.x < block.x + block.width &&
-            b.y > block.y && b.y < block.y + block.height) {
+        if (block.hp <= 0) continue;
+        if (b.x < block.x || b.x > block.x + block.width ||
+            b.y < block.y || b.y > block.y + block.height) continue;
+
+        if (block.type === 'WALL') {
+          // Ricochet: determine collision axis by minimum overlap, reflect that component
+          const overlapL = b.x - block.x;
+          const overlapR = block.x + block.width - b.x;
+          const overlapT = b.y - block.y;
+          const overlapB = block.y + block.height - b.y;
+          const minH = Math.min(overlapL, overlapR);
+          const minV = Math.min(overlapT, overlapB);
+          if (minH <= minV) {
+            b.vx = -(b.vx ?? 0);
+            b.x += (b.vx > 0 ? overlapR : -overlapL); // push out
+          } else {
+            b.vy = -(b.vy ?? 0);
+            b.y += (b.vy > 0 ? overlapB : -overlapT);
+          }
+          b.bounces = (b.bounces ?? 0) + 1;
+          if (b.bounces >= MAX_BEAM_BOUNCES) removeBeam = true;
+          break;
+        } else {
+          // Destructible block — damage and destroy beam
           block.hp -= block.type === 'BEAM_TURRET' ? 999 : 30;
           if (block.hp <= 0) {
             createExplosion(block.x + block.width / 2, block.y + block.height / 2,
@@ -3250,11 +3284,38 @@ export default function App() {
             audio.playExplosion(block.x + block.width / 2);
             setScore(s => s + (block.type === 'BEAM_TURRET' ? 800 : 200));
           }
-          hitBlock = true;
+          removeBeam = true;
           break;
         }
       }
-      if (hitBlock) enemyBullets.current.splice(bi, 1);
+      if (removeBeam) { enemyBullets.current.splice(bi, 1); continue; }
+
+      // vs alive enemies
+      for (let ei = 0; ei < enemies.current.length; ei++) {
+        const e = enemies.current[ei];
+        if (!e.alive || e.state === 'ENTERING') continue;
+        if (b.x > e.x && b.x < e.x + e.width && b.y > e.y && b.y < e.y + e.height) {
+          const dmg = 50;
+          if (e.isBoss) {
+            if (e.health !== undefined) {
+              e.health -= dmg;
+              if (e.health <= 0) {
+                e.alive = false;
+                createExplosion(e.x + e.width / 2, e.y + e.height / 2, '#00ffdd', 80);
+                audio.playExplosion(e.x + e.width / 2);
+                setScore(s => s + 2000);
+              }
+            }
+          } else {
+            e.alive = false;
+            createExplosion(e.x + e.width / 2, e.y + e.height / 2, '#00ffdd', 30);
+            audio.playExplosion(e.x + e.width / 2);
+            setScore(s => s + 150);
+          }
+          enemyBullets.current.splice(bi, 1);
+          break;
+        }
+      }
     }
 
     blocks.current = blocks.current.filter(b => b.y < CANVAS_HEIGHT + 100);
@@ -3666,7 +3727,15 @@ export default function App() {
       b.x += vx * worldSpeedScale * dt;
       b.y += vy * stageFlowScale * dt;
 
-      if (b.y > CANVAS_HEIGHT + 20 || b.y < -30 || b.x < -20 || b.x > CANVAS_WIDTH + 20) {
+      // Deflected beams ricochet off canvas edges (up to max bounces)
+      if (b.isBeam && b.deflected) {
+        const MAX_BEAM_BOUNCES = 7;
+        if (b.x < 0) { b.x = 0; b.vx = Math.abs(b.vx ?? 0); b.bounces = (b.bounces ?? 0) + 1; }
+        else if (b.x > CANVAS_WIDTH) { b.x = CANVAS_WIDTH; b.vx = -Math.abs(b.vx ?? 0); b.bounces = (b.bounces ?? 0) + 1; }
+        if (b.y < 0) { b.y = 0; b.vy = Math.abs(b.vy ?? 0); b.bounces = (b.bounces ?? 0) + 1; }
+        else if (b.y > CANVAS_HEIGHT) { b.y = CANVAS_HEIGHT; b.vy = -Math.abs(b.vy ?? 0); b.bounces = (b.bounces ?? 0) + 1; }
+        if ((b.bounces ?? 0) >= MAX_BEAM_BOUNCES) { enemyBulletList.splice(i, 1); continue; }
+      } else if (b.y > CANVAS_HEIGHT + 20 || b.y < -30 || b.x < -20 || b.x > CANVAS_WIDTH + 20) {
         enemyBulletList.splice(i, 1);
       }
     }
@@ -4689,18 +4758,33 @@ export default function App() {
         handleGraze(bulletCenterX, bulletCenterY);
       }
 
-      // Beam deflection: slingshot shield reflects BEAM_TURRET beams back upward.
-      // Deflected beams skip all player-damage logic and can destroy BEAM_TURRET blocks.
+      // Beam deflection: slingshot shield reflects BEAM_TURRET beams using proper mirror-reflection.
+      // The reflected beam then ricochets off walls and destroys enemies/blocks it hits.
       if (bullet.isBeam) {
         if (!bullet.deflected && doesShieldCatchPoint(bulletCenterX, bulletCenterY, 8)) {
-          bullet.vy = -Math.abs(bullet.vy ?? 2.2);
+          // Mirror-reflection: v' = v - 2(v·n)n, where n = normalized vector from player center to bullet
+          const pcx = playerPos.current.x + PLAYER_WIDTH / 2;
+          const pcy = playerPos.current.y + PLAYER_HEIGHT / 2;
+          const nx = bulletCenterX - pcx;
+          const ny = bulletCenterY - pcy;
+          const nlen = Math.sqrt(nx * nx + ny * ny) || 1;
+          const nnx = nx / nlen;
+          const nny = ny / nlen;
+          const dot = (bullet.vx ?? 0) * nnx + (bullet.vy ?? 2.4) * nny;
+          // Boost speed by 1.3× on deflect to make the ricochet feel punchy
+          const speed = Math.sqrt((bullet.vx ?? 0) ** 2 + (bullet.vy ?? 2.4) ** 2) * 1.3;
+          let rvx = (bullet.vx ?? 0) - 2 * dot * nnx;
+          let rvy = (bullet.vy ?? 2.4) - 2 * dot * nny;
+          const rspeed = Math.sqrt(rvx * rvx + rvy * rvy) || 1;
+          bullet.vx = (rvx / rspeed) * speed;
+          bullet.vy = (rvy / rspeed) * speed;
           bullet.deflected = true;
+          bullet.bounces = 0;
           emitSlingshotShieldImpact(bulletCenterX, bulletCenterY, 1.8);
         } else if (!bullet.deflected && bullet.x > px && bullet.x < px + pw && bullet.y > py && bullet.y < py + ph) {
           playerHit = true;
           eBullets.splice(i, 1);
         }
-        // Deflected beams travel upward — cleared by y < -30 removal in movement loop
         continue;
       }
 
@@ -6106,14 +6190,14 @@ export default function App() {
     ctx.shadowBlur = 10 * shadowScale;
     enemyBullets.current.forEach((b) => {
       if (b.isBeam) {
-        // Beam: elongated teal bar, turns white when deflected
+        // Beam: elongated bar aligned to velocity direction; white when deflected/bouncing
         const beamColor = b.deflected ? '#ffffff' : '#00ffdd';
         ctx.shadowColor = beamColor;
         ctx.shadowBlur = 18 * shadowScale;
         ctx.fillStyle = beamColor;
         ctx.save();
         ctx.translate(b.x + 5, b.y + 5);
-        if (b.deflected) ctx.rotate(Math.PI); // flip visual when going upward
+        ctx.rotate(Math.atan2(b.vy ?? 0, b.vx ?? 0) + Math.PI / 2);
         ctx.fillRect(-4, -14, 8, 28);
         ctx.restore();
         ctx.shadowBlur = 10 * shadowScale;

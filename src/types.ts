@@ -11,6 +11,7 @@ export interface Bullet {
   isHoming?: boolean;
   isBeam?: boolean;
   deflected?: boolean;
+  bounces?: number;
 }
 
 export interface Enemy {
