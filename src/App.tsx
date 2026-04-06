@@ -254,6 +254,7 @@ export default function App() {
   // Power-up & Overdrive State
   const powerUps = useRef<PowerUp[]>([]);
   const lastRepairDropAt = useRef(0);
+  const lastBossHealthUpdateAt = useRef(0);
   const repairDropsDuringBossRef = useRef(0);
   const activeEffects = useRef<Record<string, number>>({});
   const overdriveGauge = useRef(0);
@@ -3486,7 +3487,7 @@ export default function App() {
 
     // Shooting
     const isRapid = (activeEffects.current['RAPIDFIRE'] > Date.now()) || isOverdriveActiveRef.current;
-    const shootInterval = isOverdriveActiveRef.current ? 80 : isRapid ? 120 : 250;
+    const shootInterval = isOverdriveActiveRef.current ? (isMobile ? 100 : 80) : isRapid ? 120 : 250;
 
     if (gameState === 'PLAYING') {
       const now = Date.now();
@@ -3497,14 +3498,15 @@ export default function App() {
         const bulletSize = 4 + (firepowerRef.current - 1) * 2;
 
         if (isOver) {
-          // Super Overdrive Shot - Nerfed damage but kept intensity
-          for (let i = -2; i <= 2; i++) {
+          // Super Overdrive Shot — mobile fires 3-spread to save bullet/collision cost
+          const spreadRange = isMobile ? 1 : 2; // mobile: -1..1 (3 bullets), desktop: -2..2 (5)
+          for (let i = -spreadRange; i <= spreadRange; i++) {
             bullets.current.push({
               x: playerPos.current.x + PLAYER_WIDTH / 2 - bulletSize / 2 + i * 15,
               y: playerPos.current.y,
               vx: i * 0.5,
               vy: -BULLET_SPEED * 1.5,
-              damage: bulletDamage * 1.5, // 2x -> 1.5x
+              damage: bulletDamage * 1.5,
               size: bulletSize * 1.2
             });
           }
@@ -4316,7 +4318,13 @@ export default function App() {
 
           if (enemy.isBoss) {
             enemy.health! -= damage;
-            setBossHealth({ current: enemy.health!, max: enemy.maxHealth! });
+            // Throttle React state update: during Overdrive ≈75 hits/s → 60ms cap prevents
+            // that many re-renders from stalling the game loop on mobile.
+            const bossNow = Date.now();
+            if (bossNow - lastBossHealthUpdateAt.current >= (isMobile ? 60 : 16)) {
+              setBossHealth({ current: enemy.health!, max: enemy.maxHealth! });
+              lastBossHealthUpdateAt.current = bossNow;
+            }
             playerBullets.splice(i, 1);
             audio.playEnemyHit(enemy.x + enemy.width / 2);
             flash.current = 0.2;
