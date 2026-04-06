@@ -5717,40 +5717,6 @@ export default function App() {
 
     // Draw Maze Blocks
 
-    // --- Mobile BEAM_TURRET rails: horizontal track drawn at the block's world Y,
-    // spanning trackLeft to trackRight+blockWidth. Drawn BEFORE block translate so the
-    // rail uses world coords (block.y changes with world scroll, block.x stays fixed on walls).
-    blocks.current.forEach(block => {
-      if (block.type !== 'BEAM_TURRET' || block.hp <= 0 || !block.vx) return;
-      const left  = block.trackLeft  ?? 0;
-      const right = (block.trackRight ?? CANVAS_WIDTH - block.width) + block.width;
-      // Rail sits at the turret's bottom edge = the top surface of the WALL row below
-      const ry    = block.y + block.height;
-
-      ctx.save();
-      ctx.shadowBlur = 0;
-
-      // Rail bed background
-      ctx.fillStyle = 'rgba(0, 35, 50, 0.7)';
-      ctx.fillRect(left, ry - 3, right - left, 12);
-
-      // Two rail lines
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = 'rgba(0, 190, 170, 0.7)';
-      ctx.beginPath(); ctx.moveTo(left, ry); ctx.lineTo(right, ry); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(left, ry + 6); ctx.lineTo(right, ry + 6); ctx.stroke();
-
-      // Cross-ties every 14px
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = 'rgba(0, 90, 110, 0.7)';
-      for (let tx = left + 7; tx < right; tx += 14) {
-        ctx.beginPath(); ctx.moveTo(tx, ry - 3); ctx.lineTo(tx, ry + 9); ctx.stroke();
-      }
-
-      ctx.restore();
-    });
-
-    // Draw Maze Blocks (block bodies)
     blocks.current.forEach(block => {
       if (block.hp <= 0) return;
       ctx.save();
@@ -5865,21 +5831,30 @@ export default function App() {
         const isMobile = block.vx !== undefined;
         const isAiming = isMobile && drawNow < (block.haltUntil ?? 0);
 
-        // Rail slot slider — bracket at BOTTOM of turret, grips the rail on the wall surface below
+        // Caterpillar tread base — two tread pads, sits on the wall surface below
         if (isMobile) {
-          const sx = block.width / 2;
-          const by = block.height; // bottom edge in local coords
-          ctx.shadowBlur = isAiming ? 10 * shadowScale : 0;
-          ctx.shadowColor = '#00ffdd';
-          ctx.fillStyle = isAiming ? 'rgba(0,255,221,0.55)' : 'rgba(0,150,150,0.45)';
-          // Bottom bracket pad
-          ctx.fillRect(sx - 7, by - 2, 14, 7);
-          // Side grip legs reaching down
-          ctx.strokeStyle = isAiming ? 'rgba(0,255,221,0.7)' : 'rgba(0,180,160,0.5)';
-          ctx.lineWidth = 1.5;
-          ctx.beginPath(); ctx.moveTo(sx - 7, by - 2); ctx.lineTo(sx - 7, by + 5); ctx.stroke();
-          ctx.beginPath(); ctx.moveTo(sx + 7, by - 2); ctx.lineTo(sx + 7, by + 5); ctx.stroke();
+          const by = block.height - 1; // bottom edge in local coords
+          const tw = block.width * 0.28; // tread pad width
+          const th = 5;                  // tread height
           ctx.shadowBlur = 0;
+          // Left tread
+          ctx.fillStyle = isAiming ? 'rgba(0,200,180,0.7)' : 'rgba(0,120,110,0.55)';
+          ctx.fillRect(3, by - th, tw, th);
+          ctx.strokeStyle = isAiming ? 'rgba(0,255,221,0.6)' : 'rgba(0,160,140,0.5)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(3, by - th, tw, th);
+          // Tread links (small vertical lines)
+          ctx.lineWidth = 0.8;
+          for (let tx = 3 + 4; tx < 3 + tw - 2; tx += 4) {
+            ctx.beginPath(); ctx.moveTo(tx, by - th); ctx.lineTo(tx, by); ctx.stroke();
+          }
+          // Right tread
+          const rx2 = block.width - 3 - tw;
+          ctx.fillRect(rx2, by - th, tw, th);
+          ctx.strokeRect(rx2, by - th, tw, th);
+          for (let tx = rx2 + 4; tx < rx2 + tw - 2; tx += 4) {
+            ctx.beginPath(); ctx.moveTo(tx, by - th); ctx.lineTo(tx, by); ctx.stroke();
+          }
         }
 
         // Background plate
