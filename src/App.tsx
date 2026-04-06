@@ -310,7 +310,7 @@ export default function App() {
   useEffect(() => {
     window.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    stars.current = Array.from({ length: 100 }, () => ({
+    stars.current = Array.from({ length: isMobile ? 60 : 100 }, () => ({
       x: Math.random() * CANVAS_WIDTH,
       y: Math.random() * CANVAS_HEIGHT,
       size: Math.random() * 2 + 1,
@@ -5117,6 +5117,10 @@ export default function App() {
           ctx.moveTo(s.x, s.y);
           ctx.lineTo(s.x, s.y - s.size * stretch);
           ctx.stroke();
+        } else if (isMobile) {
+          // fillRect is significantly cheaper than arc on mobile GPUs
+          const d = Math.max(1, s.size);
+          ctx.fillRect(s.x - d, s.y - d, d * 2, d * 2);
         } else {
           ctx.beginPath();
           ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
@@ -5140,20 +5144,22 @@ export default function App() {
     const gridSpeed = isWarping.current ? 100 : 20;
     const gridOffset = (Date.now() / gridSpeed) % gridSpacing;
 
-    // Only draw vertical lines on mobile to save performance
-    if (!isMobile) {
-      for (let x = 0; x <= CANVAS_WIDTH; x += gridSpacing) {
+    // Skip grid entirely on mobile under load — low visual impact, non-trivial CPU cost
+    if (!isMobile || drawLoadTier === 0) {
+      if (!isMobile) {
+        for (let x = 0; x <= CANVAS_WIDTH; x += gridSpacing) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, CANVAS_HEIGHT);
+          ctx.stroke();
+        }
+      }
+      for (let y = gridOffset; y <= CANVAS_HEIGHT; y += gridSpacing) {
         ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, CANVAS_HEIGHT);
+        ctx.moveTo(0, y);
+        ctx.lineTo(CANVAS_WIDTH, y);
         ctx.stroke();
       }
-    }
-    for (let y = gridOffset; y <= CANVAS_HEIGHT; y += gridSpacing) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(CANVAS_WIDTH, y);
-      ctx.stroke();
     }
 
     if (isFinalFrontStage) {
