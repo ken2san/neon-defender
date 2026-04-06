@@ -910,7 +910,8 @@ export default function App() {
         blocks.current.push({
           id: Date.now() + i,
           x: i * blockWidth,
-          y: rowY,
+          // Mobile turret spawns one block-height above the wall row so it sits on top
+          y: isMobile ? rowY - blockHeight : rowY,
           width: blockWidth,
           height: blockHeight,
           type: slotType,
@@ -5723,7 +5724,8 @@ export default function App() {
       if (block.type !== 'BEAM_TURRET' || block.hp <= 0 || !block.vx) return;
       const left  = block.trackLeft  ?? 0;
       const right = (block.trackRight ?? CANVAS_WIDTH - block.width) + block.width;
-      const ry    = block.y + block.height * 0.18; // top-third of block = rail sits on wall surface
+      // Rail sits at the turret's bottom edge = the top surface of the WALL row below
+      const ry    = block.y + block.height;
 
       ctx.save();
       ctx.shadowBlur = 0;
@@ -5863,19 +5865,20 @@ export default function App() {
         const isMobile = block.vx !== undefined;
         const isAiming = isMobile && drawNow < (block.haltUntil ?? 0);
 
-        // Rail slot slider — the physical bracket that grips the (world-space) rail
+        // Rail slot slider — bracket at BOTTOM of turret, grips the rail on the wall surface below
         if (isMobile) {
           const sx = block.width / 2;
+          const by = block.height; // bottom edge in local coords
           ctx.shadowBlur = isAiming ? 10 * shadowScale : 0;
           ctx.shadowColor = '#00ffdd';
           ctx.fillStyle = isAiming ? 'rgba(0,255,221,0.55)' : 'rgba(0,150,150,0.45)';
-          // Top bracket
-          ctx.fillRect(sx - 7, -5, 14, 7);
-          // Side grip lines
+          // Bottom bracket pad
+          ctx.fillRect(sx - 7, by - 2, 14, 7);
+          // Side grip legs reaching down
           ctx.strokeStyle = isAiming ? 'rgba(0,255,221,0.7)' : 'rgba(0,180,160,0.5)';
           ctx.lineWidth = 1.5;
-          ctx.beginPath(); ctx.moveTo(sx - 7, -5); ctx.lineTo(sx - 7, 2); ctx.stroke();
-          ctx.beginPath(); ctx.moveTo(sx + 7, -5); ctx.lineTo(sx + 7, 2); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(sx - 7, by - 2); ctx.lineTo(sx - 7, by + 5); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(sx + 7, by - 2); ctx.lineTo(sx + 7, by + 5); ctx.stroke();
           ctx.shadowBlur = 0;
         }
 
