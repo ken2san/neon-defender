@@ -370,8 +370,9 @@ export default function App() {
     const saveData = JSON.parse(saveDataStr);
 
     setScore(saveData.score);
-    setWave(saveData.wave);
-    waveRef.current = saveData.wave;
+    const clampedWave = Math.min(saveData.wave, 10);
+    setWave(clampedWave);
+    waveRef.current = clampedWave;
     setScrapCount(saveData.scrapCount);
     setLevel(saveData.level);
     levelRef.current = saveData.level;
@@ -400,9 +401,9 @@ export default function App() {
     }
 
     setGameState('PLAYING');
-    initEnemies(saveData.wave);
+    initEnemies(clampedWave);
     audio.init();
-    const stage = Math.min(5, Math.ceil(saveData.wave / 2));
+    const stage = Math.min(5, Math.ceil(clampedWave / 2));
     audio.playBGM(stage);
     audio.playStageStart();
   };
@@ -703,8 +704,16 @@ export default function App() {
     }
     pauseStartTime.current = 0;
 
-    setGameState('PLAYING');
     waveRef.current += 1;
+
+    // Wave 10 is the final wave. If we somehow end up here past it, go to VICTORY.
+    if (waveRef.current > 10) {
+      victoryPendingRef.current = true;
+      setGameState('VICTORY');
+      return;
+    }
+
+    setGameState('PLAYING');
     setWave(waveRef.current);
 
     const stage = getStageFromWave(waveRef.current);
