@@ -870,20 +870,20 @@ export default function App() {
       tentacleChance = 0; // No tentacles — too much at once with boss fight
     } else if (currentStage === 4) {
       // Stage 4 "Chase": canyon corridor patterns.
-      // Fixed BEAM_TURRETs (edge slots 0/9) are bolted installations.
-      // Mobile BEAM_TURRETs (middle slots) patrol on rails between the nearest walls.
+      // Fixed BEAM_TURRETs (edge slots 0/9) are bolted installations on the canyon wall.
+      // Mobile BEAM_TURRETs (middle slots) descend vertically on rails, pause to aim, then fire.
       const layouts: (null | 'WALL' | 'BUILDING' | 'BEAM_TURRET')[][] = [
         ['WALL', 'WALL', null, null, null, null, null, null, null, null],          // left flank
         [null, null, null, null, null, null, null, null, 'WALL', 'WALL'],          // right flank
         [null, null, null, 'WALL', 'WALL', 'WALL', 'WALL', null, null, null],     // centre divider
         ['WALL', 'WALL', null, null, 'WALL', 'WALL', null, null, 'WALL', 'WALL'], // triple narrow lanes
         [null, 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', null], // breakable barrier
-        ['WALL', null, null, null, null, null, null, null, null, 'WALL'],          // outer walls — wide patrol lane
+        ['WALL', null, null, null, null, null, null, null, null, 'WALL'],          // outer walls — wide lane
         ['BEAM_TURRET', null, null, null, null, null, null, null, null, 'BEAM_TURRET'], // twin fixed cannons (edge)
         ['BEAM_TURRET', 'WALL', null, null, null, null, null, null, 'WALL', 'BEAM_TURRET'], // fixed cannons behind walls
-        ['WALL', null, null, null, 'BEAM_TURRET', null, null, null, null, 'WALL'], // single mobile patrol (full gap)
+        ['WALL', null, null, null, 'BEAM_TURRET', null, null, null, null, 'WALL'], // single mobile descender
         ['WALL', null, 'BUILDING', null, 'BEAM_TURRET', null, 'BUILDING', null, null, 'WALL'], // mobile + destructible cover
-        ['WALL', null, null, 'BEAM_TURRET', null, null, 'BEAM_TURRET', null, null, 'WALL'], // twin mobile patrol
+        ['WALL', null, null, 'BEAM_TURRET', null, null, 'BEAM_TURRET', null, null, 'WALL'], // twin mobile descenders
         [null, null, null, null, null, null, null, null, null, null],              // breather
         [null, null, null, null, null, null, null, null, null, null],              // breather
       ];
@@ -891,22 +891,8 @@ export default function App() {
       for (let i = 0; i < 10; i++) {
         const slotType = layout[i];
         if (!slotType) continue;
-        // Mobile: BEAM_TURRET in non-edge slots patrols on a rail between adjacent walls/edges
+        // Mobile: middle-slot BEAM_TURRETs descend on vertical rails (baseVy > 0)
         const isMobile = slotType === 'BEAM_TURRET' && i > 0 && i < 9;
-        let trackLeft: number | undefined;
-        let trackRight: number | undefined;
-        if (isMobile) {
-          let tL = 0;
-          for (let li = i - 1; li >= 0; li--) {
-            if (layout[li] === 'WALL') { tL = (li + 1) * blockWidth; break; }
-          }
-          let tR = CANVAS_WIDTH;
-          for (let ri = i + 1; ri < 10; ri++) {
-            if (layout[ri] === 'WALL') { tR = ri * blockWidth; break; }
-          }
-          trackLeft = tL;
-          trackRight = tR - blockWidth; // max x for the turret's left edge
-        }
         blocks.current.push({
           id: Date.now() + i,
           x: i * blockWidth,
@@ -918,9 +904,8 @@ export default function App() {
           maxHp: slotType === 'WALL' ? 999 : slotType === 'BEAM_TURRET' ? 50 : 10,
           color: slotType === 'WALL' ? '#1a1a2e' : slotType === 'BEAM_TURRET' ? '#00ffdd' : '#33ccff',
           lastShotTime: 0,
-          vx: isMobile ? (Math.random() < 0.5 ? 0.8 : -0.8) : undefined,
-          trackLeft,
-          trackRight,
+          baseVy: isMobile ? 0.55 : undefined, // extra descent speed on top of world scroll
+          haltUntil: 0,
         });
       }
       return;
@@ -3244,29 +3229,41 @@ export default function App() {
       });
     }
 
-    // BEAM_TURRET: side-mounted canyon cannon — fires from inner wall face aimed at the player.
-    // Left-edge turrets fire rightward; right-edge turrets fire leftward.
-    // Deflect with slingshot shield to ricochet off walls and destroy the turret.
+    // BEAM_TURRET: fires from turret center aimed at the player every 3.5s.
+    // Mobile variant: 700ms before firing it halts (haltUntil latch), telegraphing the shot.
     {
       const now = Date.now();
+      const FIRE_INTERVAL = 3500;
+      const HALT_LEAD = 700; // ms before fire when mobile turret freezes to aim
       blocks.current.forEach(block => {
         if (block.type !== 'BEAM_TURRET' || block.hp <= 0) return;
         if (block.y < -block.height || block.y > CANVAS_HEIGHT) return;
-        if (now - (block.lastShotTime ?? 0) < 3500) return;
+        const timeSinceShot = now - (block.lastShotTime ?? 0);
+        const isMobile = block.baseVy !== undefined;
+        // Mobile: latch haltUntil once when entering the aim window
+        if (isMobile && timeSinceShot >= FIRE_INTERVAL - HALT_LEAD && !block.haltUntil) {
+          block.haltUntil = now + HALT_LEAD;
+        }
+        // Not yet time to fire
+        if (timeSinceShot < FIRE_INTERVAL) return;
+        // Mobile: still in halt (shouldn't normally happen since HALT_LEAD <= 700ms, but guard it)
+        if (isMobile && block.haltUntil && now < block.haltUntil) return;
+        // Fire
         block.lastShotTime = now;
-        const isLeft = block.x + block.width / 2 < CANVAS_WIDTH / 2;
-        // Spawn from the inner face (right side of left block, left side of right block)
-        const ox = isLeft ? block.x + block.width : block.x;
-        const oy = block.y + block.height / 2;
+        block.haltUntil = undefined; // clear for next cycle
+        const cx = block.x + block.width / 2;
+        const cy = block.y + block.height / 2;
         const tx = playerPos.current.x + PLAYER_WIDTH / 2;
         const ty = playerPos.current.y + PLAYER_HEIGHT / 2;
-        const dx = tx - ox;
-        const dy = ty - oy;
+        const dx = tx - cx;
+        const dy = ty - cy;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
         const speed = 3.8;
+        const hexR = Math.min(block.width, block.height) * 0.28;
+        const aimAngle = Math.atan2(dy, dx);
         enemyBullets.current.push({
-          x: ox,
-          y: oy - 5,
+          x: cx + Math.cos(aimAngle) * (hexR + 14),
+          y: cy + Math.sin(aimAngle) * (hexR + 14),
           vx: (dx / dist) * speed,
           vy: (dy / dist) * speed,
           damage: 25,
@@ -3385,28 +3382,24 @@ export default function App() {
       }
     }
 
-    // BEAM_TURRET patrol: mobile turrets (trackLeft set) slide on their rail and bounce at bounds
-    blocks.current.forEach(turret => {
-      if (turret.type !== 'BEAM_TURRET' || turret.hp <= 0 || !turret.vx) return;
-      turret.x += turret.vx * worldSpeedScale * dt;
-      if (turret.trackLeft !== undefined && turret.trackRight !== undefined) {
-        // Use pre-computed track bounds — clean bounce at rail endpoints
-        if (turret.x < turret.trackLeft) { turret.x = turret.trackLeft; turret.vx = Math.abs(turret.vx); }
-        else if (turret.x > turret.trackRight) { turret.x = turret.trackRight; turret.vx = -Math.abs(turret.vx); }
-      } else {
-        // Fallback: canvas-edge bounce + WALL neighbour bounce
-        if (turret.x < 0) { turret.x = 0; turret.vx = Math.abs(turret.vx); }
-        else if (turret.x + turret.width > CANVAS_WIDTH) { turret.x = CANVAS_WIDTH - turret.width; turret.vx = -Math.abs(turret.vx); }
-        for (const wall of blocks.current) {
-          if (wall === turret || wall.type !== 'WALL' || wall.hp <= 0) continue;
-          if (Math.abs((wall.y + wall.height / 2) - (turret.y + turret.height / 2)) > turret.height) continue;
-          if (turret.x < wall.x + wall.width && turret.x + turret.width > wall.x) {
-            if (turret.vx > 0) { turret.x = wall.x - turret.width; turret.vx = -turret.vx; }
-            else { turret.x = wall.x + wall.width; turret.vx = -turret.vx; }
-          }
+    // BEAM_TURRET mobile: extra descent + halt-to-aim behaviour
+    {
+      const now = Date.now();
+      blocks.current.forEach(turret => {
+        if (turret.type !== 'BEAM_TURRET' || turret.hp <= 0) return;
+        if (turret.baseVy === undefined) return; // fixed turrets: no extra movement
+        const halting = now < (turret.haltUntil ?? 0);
+        if (!halting) {
+          // Descend faster than world scroll to approach the player
+          turret.y += turret.baseVy * worldSpeedScale * dt;
         }
-      }
-    });
+        // After firing, briefly accelerate (lunge) to add personality
+        const msSinceFire = now - (turret.lastShotTime ?? 0);
+        if (msSinceFire < 400 && !halting) {
+          turret.y += turret.baseVy * 2 * worldSpeedScale * dt;
+        }
+      });
+    }
 
     blocks.current = blocks.current.filter(b => b.y < CANVAS_HEIGHT + 100);
 
@@ -5815,56 +5808,54 @@ export default function App() {
         ctx.arc(wcx, wcy, 5, 0, Math.PI * 2);
         ctx.fill();
       } else if (block.type === 'BEAM_TURRET') {
-        // Canyon beam cannon: barrel continuously tracks the player.
-        // Mobile variant (trackLeft set) rides a rail; fixed variant has anchor bolts.
         const tcx = block.width / 2;
         const tcy = block.height / 2;
         const timeSinceShot = drawNow - (block.lastShotTime ?? 0);
         const chargeProgress = Math.min(1, timeSinceShot / 3500);
+        const isMobile = block.baseVy !== undefined;
+        const isAiming = isMobile && drawNow < (block.haltUntil ?? 0);
 
-        // Angle from turret center to player — live tracking
-        const aimAngle = Math.atan2(
-          (playerPos.current.y + PLAYER_HEIGHT / 2) - (block.y + tcy),
-          (playerPos.current.x + PLAYER_WIDTH / 2) - (block.x + tcx)
-        );
-
-        // --- RAIL (mobile only) ---
-        if (block.trackLeft !== undefined && block.trackRight !== undefined) {
-          const railL = block.trackLeft - block.x;              // local-space left end
-          const railR = block.trackRight + block.width - block.x; // local-space right end
-          const railY = block.height - 2;
-          // Track bed
+        // --- VERTICAL RAIL (mobile only) — extends upward from turret top ---
+        if (isMobile) {
+          const railX1 = tcx - 5;
+          const railX2 = tcx + 5;
+          const railTop = -block.height * 4;  // extends upward off-screen
           ctx.shadowBlur = 0;
-          ctx.fillStyle = 'rgba(20, 50, 70, 0.9)';
-          ctx.fillRect(railL, railY - 9, railR - railL, 9);
+          // Groove background
+          ctx.fillStyle = 'rgba(0, 40, 55, 0.85)';
+          ctx.fillRect(railX1 - 2, railTop, 14, -railTop);
           // Two rails
-          ctx.strokeStyle = 'rgba(0, 180, 180, 0.75)';
+          ctx.strokeStyle = 'rgba(0, 200, 180, 0.7)';
           ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.moveTo(railL, railY - 7); ctx.lineTo(railR, railY - 7); ctx.stroke();
-          ctx.beginPath(); ctx.moveTo(railL, railY - 2); ctx.lineTo(railR, railY - 2); ctx.stroke();
-          // Cross-ties
-          ctx.strokeStyle = 'rgba(40, 90, 110, 0.8)';
+          ctx.beginPath(); ctx.moveTo(railX1, railTop); ctx.lineTo(railX1, 0); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(railX2, railTop); ctx.lineTo(railX2, 0); ctx.stroke();
+          // Cross-ties every 20px
+          ctx.strokeStyle = 'rgba(0, 100, 120, 0.7)';
           ctx.lineWidth = 1.5;
-          const tieStep = 18;
-          const tieStart = Math.ceil(railL / tieStep) * tieStep;
-          for (let tieX = tieStart; tieX <= railR; tieX += tieStep) {
-            ctx.beginPath(); ctx.moveTo(tieX, railY - 10); ctx.lineTo(tieX, railY); ctx.stroke();
+          const firstTie = Math.ceil(railTop / 20) * 20;
+          for (let ty2 = firstTie; ty2 <= 0; ty2 += 20) {
+            ctx.beginPath(); ctx.moveTo(railX1 - 3, ty2); ctx.lineTo(railX2 + 3, ty2); ctx.stroke();
           }
-          // Turret base (wheel block riding the rail)
-          ctx.fillStyle = 'rgba(0, 160, 160, 0.5)';
-          ctx.fillRect(tcx - 10, block.height - 9, 20, 7);
+          // Wheel / slider at block top
+          ctx.fillStyle = isAiming ? 'rgba(0,255,221,0.6)' : 'rgba(0,160,160,0.5)';
+          if (isAiming) { ctx.shadowBlur = 10 * shadowScale; ctx.shadowColor = '#00ffdd'; }
+          ctx.fillRect(railX1 - 2, 0, 16, 6);
+          ctx.shadowBlur = 0;
         }
 
+        // Background plate
         ctx.fillStyle = 'rgba(0, 20, 30, 0.9)';
-        ctx.fillRect(0, 0, block.width, block.height - (block.trackLeft !== undefined ? 9 : 0));
+        ctx.fillRect(2, 2, block.width - 4, block.height - 4);
 
         const glow = (6 + chargeProgress * 22) * shadowScale;
-        ctx.shadowBlur = glow;
+        ctx.shadowBlur = isAiming ? glow * 1.6 : glow;
         ctx.shadowColor = '#00ffdd';
 
-        // Hexagon body — pulsing brighter as charge builds
-        ctx.strokeStyle = `rgba(0, 255, 221, ${0.3 + chargeProgress * 0.7})`;
-        ctx.lineWidth = 1.5 + chargeProgress * 1.5;
+        // Hexagon body — pulses brighter while aiming
+        ctx.strokeStyle = isAiming
+          ? `rgba(0, 255, 221, ${0.6 + 0.4 * Math.sin(drawNow / 80)})`
+          : `rgba(0, 255, 221, ${0.3 + chargeProgress * 0.7})`;
+        ctx.lineWidth = isAiming ? 3 : 1.5 + chargeProgress * 1.5;
         const hexR = Math.min(block.width, block.height) * 0.28;
         ctx.beginPath();
         for (let k = 0; k < 6; k++) {
@@ -5875,8 +5866,8 @@ export default function App() {
         ctx.closePath();
         ctx.stroke();
 
-        // Anchor bolts for fixed turrets
-        if (block.trackLeft === undefined) {
+        // Anchor bolts for fixed turrets (no baseVy)
+        if (!isMobile) {
           ctx.strokeStyle = 'rgba(0, 200, 180, 0.5)';
           ctx.lineWidth = 2;
           ctx.lineCap = 'round';
@@ -5888,35 +5879,55 @@ export default function App() {
           ctx.beginPath(); ctx.arc(tcx + hexR * 0.5, block.height - 2, 2.5, 0, Math.PI * 2); ctx.fill();
         }
 
-        // Barrel tracks player
+        // Angle from turret center to player — live tracking
+        const aimAngle = Math.atan2(
+          (playerPos.current.y + PLAYER_HEIGHT / 2) - (block.y + tcy),
+          (playerPos.current.x + PLAYER_WIDTH / 2) - (block.x + tcx)
+        );
+
+        // Barrel
         const barrelLen = hexR + 14;
         const barrelTipX = tcx + Math.cos(aimAngle) * barrelLen;
         const barrelTipY = tcy + Math.sin(aimAngle) * barrelLen;
-        ctx.shadowBlur = glow;
+        ctx.shadowBlur = isAiming ? glow * 2 : glow;
         ctx.shadowColor = '#00ffdd';
-        ctx.strokeStyle = `rgba(0, 255, 221, ${0.3 + chargeProgress * 0.7})`;
-        ctx.lineWidth = 4;
+        ctx.strokeStyle = isAiming
+          ? `rgba(255, 255, 221, ${0.8 + 0.2 * Math.sin(drawNow / 55)})`
+          : `rgba(0, 255, 221, ${0.3 + chargeProgress * 0.7})`;
+        ctx.lineWidth = isAiming ? 5 : 4;
         ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(tcx, tcy);
         ctx.lineTo(barrelTipX, barrelTipY);
         ctx.stroke();
 
+        // Aiming: red targeting lines through turret center
+        if (isAiming) {
+          const lockAlpha = 0.35 + 0.2 * Math.sin(drawNow / 60);
+          ctx.strokeStyle = `rgba(255, 80, 80, ${lockAlpha})`;
+          ctx.lineWidth = 1;
+          ctx.shadowBlur = 6 * shadowScale;
+          ctx.shadowColor = '#ff5050';
+          ctx.beginPath(); ctx.moveTo(0, tcy); ctx.lineTo(block.width, tcy); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(tcx, 0); ctx.lineTo(tcx, block.height); ctx.stroke();
+        }
+
         // Telegraph: expanding ring + tip pulse when charge ≥ 70%
         if (chargeProgress >= 0.7) {
           const ringProgress = (chargeProgress - 0.7) / 0.3;
-          const ringR = hexR * (1.2 + ringProgress * 1.4);
           ctx.strokeStyle = `rgba(0, 255, 221, ${0.6 * ringProgress})`;
           ctx.lineWidth = 2 * ringProgress;
           ctx.shadowBlur = 14 * shadowScale * ringProgress;
+          ctx.shadowColor = '#00ffdd';
           ctx.beginPath();
-          ctx.arc(tcx, tcy, ringR, 0, Math.PI * 2);
+          ctx.arc(tcx, tcy, hexR * (1.2 + ringProgress * 1.4), 0, Math.PI * 2);
           ctx.stroke();
         }
-        if (chargeProgress >= 0.85) {
+        if (chargeProgress >= 0.85 || isAiming) {
           const tipPulse = 3 + Math.sin(drawNow / 45) * 2.5;
-          ctx.fillStyle = `rgba(0, 255, 221, ${0.7 + 0.3 * Math.sin(drawNow / 45)})`;
+          ctx.fillStyle = isAiming ? '#ffffff' : `rgba(0,255,221,${0.7 + 0.3 * Math.sin(drawNow / 45)})`;
           ctx.shadowBlur = 26 * shadowScale;
+          ctx.shadowColor = '#00ffdd';
           ctx.beginPath();
           ctx.arc(barrelTipX, barrelTipY, tipPulse, 0, Math.PI * 2);
           ctx.fill();

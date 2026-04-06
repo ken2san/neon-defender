@@ -140,10 +140,12 @@ export interface Obstacle {
   lastCenterBonus?: number;
   segments?: { x: number, y: number, angle: number }[];
   baseX?: number;
-  vx?: number;          // horizontal patrol speed (BEAM_TURRET)
+  vx?: number;          // UNUSED — kept for backward compat
   chargeHits?: number;  // beam hits absorbed before burst (BUILDING chain reaction)
-  trackLeft?: number;   // world-x of left patrol boundary (mobile BEAM_TURRET)
-  trackRight?: number;  // world-x of max left-edge position at right boundary
+  trackLeft?: number;   // UNUSED — kept for backward compat
+  trackRight?: number;  // UNUSED — kept for backward compat
+  baseVy?: number;      // extra downward speed for mobile BEAM_TURRET (on top of scroll)
+  haltUntil?: number;   // timestamp: mobile turret freezes while aiming before firing
 }
 
 export interface DamageNumber {
