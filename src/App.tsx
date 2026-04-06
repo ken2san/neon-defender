@@ -3086,24 +3086,28 @@ export default function App() {
         }
       });
       // Windmill blade destroys any bullet (player or enemy) that enters the swept arc.
+      // Under load, stride the check — missing one frame has no fairness impact at 60fps+.
       if (block.type === 'WINDMILL' && block.hp > 0) {
-        const wbcx = block.x + block.width / 2;
-        const wbcy = block.y + block.height / 2;
-        const wbArm = block.height * 2.9;
-        const wbRot = frameNow * 0.00025 + (block.id % 100) * 0.9;
-        const hitsWindmillBlade = (bx: number, by: number) => {
-          const ddx = bx - wbcx;
-          const ddy = by - wbcy;
-          const dd = ddx * ddx + ddy * ddy;
-          if (dd > wbArm * wbArm || dd < 16) return false;
-          const bAngle = Math.atan2(ddy, ddx);
-          for (let k = 0; k < 2; k++) {
-            if (Math.abs(normalizeAngle(bAngle - (wbRot + k * Math.PI))) < 0.15) return true;
-          }
-          return false;
-        };
-        bullets.current.forEach(b => { if (b.y > -50 && hitsWindmillBlade(b.x, b.y)) b.y = -100; });
-        enemyBullets.current.forEach(b => { if (b.y > -50 && b.y < CANVAS_HEIGHT + 50 && hitsWindmillBlade(b.x, b.y)) b.y = -100; });
+        const windmillStride = isCriticalSim ? 3 : isReducedSim ? 2 : 1;
+        if (frameCounterRef.current % windmillStride === 0) {
+          const wbcx = block.x + block.width / 2;
+          const wbcy = block.y + block.height / 2;
+          const wbArm = block.height * 2.9;
+          const wbRot = frameNow * 0.00025 + (block.id % 100) * 0.9;
+          const hitsWindmillBlade = (bx: number, by: number) => {
+            const ddx = bx - wbcx;
+            const ddy = by - wbcy;
+            const dd = ddx * ddx + ddy * ddy;
+            if (dd > wbArm * wbArm || dd < 16) return false;
+            const bAngle = Math.atan2(ddy, ddx);
+            for (let k = 0; k < 2; k++) {
+              if (Math.abs(normalizeAngle(bAngle - (wbRot + k * Math.PI))) < 0.15) return true;
+            }
+            return false;
+          };
+          bullets.current.forEach(b => { if (b.y > -50 && hitsWindmillBlade(b.x, b.y)) b.y = -100; });
+          enemyBullets.current.forEach(b => { if (b.y > -50 && b.y < CANVAS_HEIGHT + 50 && hitsWindmillBlade(b.x, b.y)) b.y = -100; });
+        }
       }
     });
     // TURRET_BLOCK shooting: aim and fire at player
@@ -5059,6 +5063,11 @@ export default function App() {
     const drawLoadTier = renderLoadTierRef.current;
     const isReducedBossFx = drawLoadTier >= 1;
     const isMinimalBossFx = drawLoadTier >= 2;
+    // shadowBlur scale: tier 0 = full, tier 1 = 60%, tier 2 = 0 (off)
+    // On mobile tier 0 is already reduced; desktop is unaffected until load rises.
+    const shadowScale = isMobile
+      ? (drawLoadTier >= 2 ? 0 : drawLoadTier >= 1 ? 0.5 : 0.7)
+      : 1;
     const isChase = currentStage === 4;
     const isFinalFrontStage = currentStage === 5;
     const isChaseLoadReduced = isChase && drawLoadTier >= 1;  // Skip fancy Chase rendering under load
@@ -5270,11 +5279,9 @@ export default function App() {
     scraps.current.forEach(s => {
       ctx.save();
       ctx.translate(s.x, s.y);
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = 10 * shadowScale;
       ctx.shadowColor = '#00ffcc';
       ctx.fillStyle = '#00ffcc';
-      ctx.beginPath();
-      ctx.arc(0, 0, 2, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     });
@@ -5292,7 +5299,7 @@ export default function App() {
             ? '#66ff99'
             : '#ff33cc';
       const label = p.type === 'REPAIR' ? 'H' : p.type[0];
-      ctx.shadowBlur = 15;
+      ctx.shadowBlur = 15 * shadowScale;
       ctx.shadowColor = color;
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
@@ -5392,7 +5399,7 @@ export default function App() {
       ctx.translate(block.x, block.y);
 
       const color = block.color;
-      ctx.shadowBlur = block.type === 'WALL' ? 0 : (isFinalFrontStage ? 9 : 15);
+      ctx.shadowBlur = block.type === 'WALL' ? 0 : (isFinalFrontStage ? 9 : 15) * shadowScale;
       ctx.shadowColor = color;
       ctx.strokeStyle = color;
       ctx.lineWidth = block.type === 'WALL' ? (isFinalFrontStage ? 2 : 1) : 2;
@@ -5422,7 +5429,7 @@ export default function App() {
         const tcx = block.width / 2;
         const tcy = block.height / 2;
         const tr = Math.min(block.width, block.height) * 0.26;
-        ctx.shadowBlur = 14;
+        ctx.shadowBlur = 14 * shadowScale;
         ctx.shadowColor = '#ff9900';
         ctx.strokeStyle = '#ff9900';
         ctx.lineWidth = 2;
@@ -5462,7 +5469,7 @@ export default function App() {
         // Arms extend well beyond block edges to act as a corridor hazard.
         const armLen = block.height * 2.9;
         const rot = drawNow * 0.00025 + (block.id % 100) * 0.9;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = 10 * shadowScale;
         ctx.shadowColor = '#00ffaa';
         ctx.strokeStyle = '#00ffaa';
         ctx.lineWidth = 3;
@@ -5475,7 +5482,7 @@ export default function App() {
           ctx.stroke();
         }
         ctx.fillStyle = '#00ffaa';
-        ctx.shadowBlur = 6;
+        ctx.shadowBlur = 6 * shadowScale;
         ctx.beginPath();
         ctx.arc(wcx, wcy, 5, 0, Math.PI * 2);
         ctx.fill();
@@ -5566,7 +5573,7 @@ export default function App() {
       ctx.save();
       ctx.globalAlpha = t.alpha * VFX_SLINGSHOT_TRAIL_ALPHA;
       ctx.fillStyle = '#ffffff';
-      ctx.shadowBlur = 15;
+      ctx.shadowBlur = 15 * shadowScale;
       ctx.shadowColor = '#00ffcc';
       ctx.beginPath();
       ctx.arc(t.x, t.y, 10 * t.alpha, 0, Math.PI * 2);
@@ -5858,7 +5865,7 @@ export default function App() {
       if (activeEffects.current['SHIELD'] > Date.now()) {
         ctx.strokeStyle = '#33ccff';
         ctx.lineWidth = 2;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = 10 * shadowScale;
         ctx.beginPath();
         ctx.arc(0, 0, 35, 0, Math.PI * 2);
         ctx.stroke();
@@ -5876,7 +5883,7 @@ export default function App() {
       const color = '#ff33cc';
       ctx.strokeStyle = color;
       ctx.shadowColor = color;
-      ctx.shadowBlur = 15;
+      ctx.shadowBlur = 15 * shadowScale;
       ctx.lineWidth = 2;
 
       // High-End Neon Vector Ship (Wingman)
@@ -5896,7 +5903,7 @@ export default function App() {
     }
 
     // Bullets
-    if (!isMobile) ctx.shadowBlur = 15;
+    ctx.shadowBlur = 15 * shadowScale;
     bullets.current.forEach((b) => {
       const size = b.size || 4;
       ctx.fillStyle = isOverdriveActiveRef.current ? '#ff3366' : '#00ffcc';
@@ -5907,10 +5914,8 @@ export default function App() {
 
     // Enemy Bullets
     ctx.fillStyle = '#ff9900'; // Changed to Orange for better visibility against player's pink Overdrive
-    if (!isMobile) {
-      ctx.shadowColor = '#ff9900';
-      ctx.shadowBlur = 10;
-    }
+    ctx.shadowColor = '#ff9900';
+    ctx.shadowBlur = 10 * shadowScale;
     enemyBullets.current.forEach((b) => {
       ctx.beginPath();
       ctx.arc(b.x + 2, b.y + 6, 4, 0, Math.PI * 2);
