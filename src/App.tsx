@@ -5727,19 +5727,29 @@ export default function App() {
         ctx.arc(wcx, wcy, 5, 0, Math.PI * 2);
         ctx.fill();
       } else if (block.type === 'BEAM_TURRET') {
-        // Side-mounted canyon cannon — barrel points inward, fires horizontally at player.
+        // Canyon beam cannon: barrel continuously tracks the player.
+        // Charge glow intensifies and a telegraph ring expands just before firing.
         const tcx = block.width / 2;
         const tcy = block.height / 2;
         const timeSinceShot = drawNow - (block.lastShotTime ?? 0);
         const chargeProgress = Math.min(1, timeSinceShot / 3500);
-        const isLeft = block.x + block.width / 2 < CANVAS_WIDTH / 2;
+
+        // Angle from turret center to player — live tracking
+        const aimAngle = Math.atan2(
+          (playerPos.current.y + PLAYER_HEIGHT / 2) - (block.y + tcy),
+          (playerPos.current.x + PLAYER_WIDTH / 2) - (block.x + tcx)
+        );
+
         ctx.fillStyle = 'rgba(0, 20, 30, 0.9)';
         ctx.fillRect(0, 0, block.width, block.height);
-        const glow = (8 + chargeProgress * 18) * shadowScale;
+
+        const glow = (6 + chargeProgress * 22) * shadowScale;
         ctx.shadowBlur = glow;
         ctx.shadowColor = '#00ffdd';
-        ctx.strokeStyle = `rgba(0, 255, 221, ${0.35 + chargeProgress * 0.65})`;
-        ctx.lineWidth = 2;
+
+        // Hexagon body — pulsing brighter as charge builds
+        ctx.strokeStyle = `rgba(0, 255, 221, ${0.3 + chargeProgress * 0.7})`;
+        ctx.lineWidth = 1.5 + chargeProgress * 1.5;
         const hexR = Math.min(block.width, block.height) * 0.28;
         ctx.beginPath();
         for (let k = 0; k < 6; k++) {
@@ -5749,20 +5759,35 @@ export default function App() {
         }
         ctx.closePath();
         ctx.stroke();
-        // Barrel pointing inward (right for left-edge, left for right-edge)
-        const barrelTipX = tcx + (isLeft ? hexR + 12 : -(hexR + 12));
+
+        // Barrel tracks player
+        const barrelLen = hexR + 14;
+        const barrelTipX = tcx + Math.cos(aimAngle) * barrelLen;
+        const barrelTipY = tcy + Math.sin(aimAngle) * barrelLen;
         ctx.lineWidth = 4;
         ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(tcx, tcy);
-        ctx.lineTo(barrelTipX, tcy);
+        ctx.lineTo(barrelTipX, barrelTipY);
         ctx.stroke();
-        // Charge tip pulse when nearly ready
-        if (chargeProgress >= 0.85) {
-          ctx.fillStyle = '#00ffdd';
-          ctx.shadowBlur = 22 * shadowScale;
+
+        // Telegraph: expanding ring + tip pulse when charge ≥ 70%
+        if (chargeProgress >= 0.7) {
+          const ringProgress = (chargeProgress - 0.7) / 0.3; // 0→1 over final 30%
+          const ringR = hexR * (1.2 + ringProgress * 1.4);
+          ctx.strokeStyle = `rgba(0, 255, 221, ${0.6 * ringProgress})`;
+          ctx.lineWidth = 2 * ringProgress;
+          ctx.shadowBlur = 14 * shadowScale * ringProgress;
           ctx.beginPath();
-          ctx.arc(barrelTipX, tcy, 3 + Math.sin(drawNow / 55) * 2, 0, Math.PI * 2);
+          ctx.arc(tcx, tcy, ringR, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        if (chargeProgress >= 0.85) {
+          const tipPulse = 3 + Math.sin(drawNow / 45) * 2.5;
+          ctx.fillStyle = `rgba(0, 255, 221, ${0.7 + 0.3 * Math.sin(drawNow / 45)})`;
+          ctx.shadowBlur = 26 * shadowScale;
+          ctx.beginPath();
+          ctx.arc(barrelTipX, barrelTipY, tipPulse, 0, Math.PI * 2);
           ctx.fill();
         }
       } else if (block.type === 'TENTACLE' && block.segments) {
