@@ -3211,8 +3211,9 @@ export default function App() {
       });
     }
 
-    // BEAM_TURRET: fires a slow charged beam aimed at the player every 3.5s.
-    // The slingshot shield deflects it — the reflected beam ricochets off walls and destroys what it hits.
+    // BEAM_TURRET: side-mounted canyon cannon — fires from inner wall face aimed at the player.
+    // Left-edge turrets fire rightward; right-edge turrets fire leftward.
+    // Deflect with slingshot shield to ricochet off walls and destroy the turret.
     {
       const now = Date.now();
       blocks.current.forEach(block => {
@@ -3220,17 +3221,19 @@ export default function App() {
         if (block.y < -block.height || block.y > CANVAS_HEIGHT) return;
         if (now - (block.lastShotTime ?? 0) < 3500) return;
         block.lastShotTime = now;
-        const ox = block.x + block.width / 2;
-        const oy = block.y + block.height;
+        const isLeft = block.x + block.width / 2 < CANVAS_WIDTH / 2;
+        // Spawn from the inner face (right side of left block, left side of right block)
+        const ox = isLeft ? block.x + block.width : block.x;
+        const oy = block.y + block.height / 2;
         const tx = playerPos.current.x + PLAYER_WIDTH / 2;
         const ty = playerPos.current.y + PLAYER_HEIGHT / 2;
         const dx = tx - ox;
         const dy = ty - oy;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const speed = 2.4;
+        const speed = 3.8;
         enemyBullets.current.push({
-          x: ox - 5,
-          y: oy,
+          x: ox,
+          y: oy - 5,
           vx: (dx / dist) * speed,
           vy: (dy / dist) * speed,
           damage: 25,
@@ -5724,11 +5727,12 @@ export default function App() {
         ctx.arc(wcx, wcy, 5, 0, Math.PI * 2);
         ctx.fill();
       } else if (block.type === 'BEAM_TURRET') {
-        // Canyon beam cannon — fires downward; deflect with slingshot shield to destroy.
+        // Side-mounted canyon cannon — barrel points inward, fires horizontally at player.
         const tcx = block.width / 2;
         const tcy = block.height / 2;
         const timeSinceShot = drawNow - (block.lastShotTime ?? 0);
         const chargeProgress = Math.min(1, timeSinceShot / 3500);
+        const isLeft = block.x + block.width / 2 < CANVAS_WIDTH / 2;
         ctx.fillStyle = 'rgba(0, 20, 30, 0.9)';
         ctx.fillRect(0, 0, block.width, block.height);
         const glow = (8 + chargeProgress * 18) * shadowScale;
@@ -5745,19 +5749,20 @@ export default function App() {
         }
         ctx.closePath();
         ctx.stroke();
-        // Barrel pointing down
+        // Barrel pointing inward (right for left-edge, left for right-edge)
+        const barrelTipX = tcx + (isLeft ? hexR + 12 : -(hexR + 12));
         ctx.lineWidth = 4;
         ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(tcx, tcy);
-        ctx.lineTo(tcx, tcy + hexR + 14);
+        ctx.lineTo(barrelTipX, tcy);
         ctx.stroke();
         // Charge tip pulse when nearly ready
         if (chargeProgress >= 0.85) {
           ctx.fillStyle = '#00ffdd';
           ctx.shadowBlur = 22 * shadowScale;
           ctx.beginPath();
-          ctx.arc(tcx, tcy + hexR + 14, 3 + Math.sin(drawNow / 55) * 2, 0, Math.PI * 2);
+          ctx.arc(barrelTipX, tcy, 3 + Math.sin(drawNow / 55) * 2, 0, Math.PI * 2);
           ctx.fill();
         }
       } else if (block.type === 'TENTACLE' && block.segments) {
