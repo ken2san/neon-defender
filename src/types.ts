@@ -140,6 +140,8 @@ export interface Obstacle {
   lastCenterBonus?: number;
   segments?: { x: number, y: number, angle: number }[];
   baseX?: number;
+  vx?: number;          // horizontal patrol speed (BEAM_TURRET)
+  chargeHits?: number;  // beam hits absorbed before burst (BUILDING chain reaction)
 }
 
 export interface DamageNumber {

@@ -899,6 +899,8 @@ export default function App() {
           maxHp: slotType === 'WALL' ? 999 : slotType === 'BEAM_TURRET' ? 50 : 10,
           color: slotType === 'WALL' ? '#1a1a2e' : slotType === 'BEAM_TURRET' ? '#00ffdd' : '#33ccff',
           lastShotTime: 0,
+          // BEAM_TURRET patrols horizontally along its row; direction flips when hitting walls/edges
+          vx: slotType === 'BEAM_TURRET' ? (Math.random() < 0.5 ? 0.7 : -0.7) : undefined,
         });
       }
       return;
@@ -3289,8 +3291,39 @@ export default function App() {
           b.bounces = (b.bounces ?? 0) + 1;
           if (b.bounces >= MAX_BEAM_BOUNCES) removeBeam = true;
           break;
+        } else if (block.type === 'BUILDING') {
+          // BUILDING absorbs beam energy — burst-explodes on 2nd hit, chain-damaging neighbours
+          block.chargeHits = (block.chargeHits ?? 0) + 1;
+          if (block.chargeHits >= 2) {
+            // Burst: destroy this block and damage all blocks within ~1.5 block-widths
+            block.hp = 0;
+            createExplosion(block.x + block.width / 2, block.y + block.height / 2, '#ffcc00', 55);
+            audio.playExplosion(block.x + block.width / 2);
+            setScore(s => s + 400);
+            const bx = block.x + block.width / 2;
+            const by = block.y + block.height / 2;
+            for (let ni = 0; ni < blocks.current.length; ni++) {
+              const nb = blocks.current[ni];
+              if (nb === block || nb.hp <= 0 || nb.type === 'WALL') continue;
+              const ndx = (nb.x + nb.width / 2) - bx;
+              const ndy = (nb.y + nb.height / 2) - by;
+              if (Math.sqrt(ndx * ndx + ndy * ndy) < block.width * 1.8) {
+                nb.hp -= nb.type === 'BEAM_TURRET' ? 999 : 15;
+                if (nb.hp <= 0) {
+                  createExplosion(nb.x + nb.width / 2, nb.y + nb.height / 2, nb.type === 'BEAM_TURRET' ? '#00ffdd' : '#ffcc00', 35);
+                  audio.playExplosion(nb.x + nb.width / 2);
+                  setScore(s => s + (nb.type === 'BEAM_TURRET' ? 800 : 200));
+                }
+              }
+            }
+            removeBeam = true;
+          } else {
+            // First hit: beam is absorbed; block glows (chargeHits drives render)
+            removeBeam = true;
+          }
+          break;
         } else {
-          // Destructible block — damage and destroy beam
+          // Other destructible (BEAM_TURRET direct hit, PILLAR, etc.)
           block.hp -= block.type === 'BEAM_TURRET' ? 999 : 30;
           if (block.hp <= 0) {
             createExplosion(block.x + block.width / 2, block.y + block.height / 2,
@@ -3331,6 +3364,25 @@ export default function App() {
         }
       }
     }
+
+    // BEAM_TURRET patrol: slide horizontally, bounce off WALL neighbours and canvas edges
+    blocks.current.forEach(turret => {
+      if (turret.type !== 'BEAM_TURRET' || turret.hp <= 0 || !turret.vx) return;
+      turret.x += turret.vx * worldSpeedScale * dt;
+      // Clamp and bounce off canvas edges
+      if (turret.x < 0) { turret.x = 0; turret.vx = Math.abs(turret.vx); }
+      else if (turret.x + turret.width > CANVAS_WIDTH) { turret.x = CANVAS_WIDTH - turret.width; turret.vx = -Math.abs(turret.vx); }
+      // Bounce off adjacent WALL blocks in the same row
+      for (const wall of blocks.current) {
+        if (wall === turret || wall.type !== 'WALL' || wall.hp <= 0) continue;
+        // Same row: y-centres within half a block-height of each other
+        if (Math.abs((wall.y + wall.height / 2) - (turret.y + turret.height / 2)) > turret.height) continue;
+        if (turret.x < wall.x + wall.width && turret.x + turret.width > wall.x) {
+          if (turret.vx > 0) { turret.x = wall.x - turret.width; turret.vx = -turret.vx; }
+          else { turret.x = wall.x + wall.width; turret.vx = -turret.vx; }
+        }
+      }
+    });
 
     blocks.current = blocks.current.filter(b => b.y < CANVAS_HEIGHT + 100);
 
@@ -5866,6 +5918,14 @@ export default function App() {
           ctx.fill();
         } else {
           ctx.strokeRect(10, 10, block.width - 20, block.height - 20);
+        }
+        // Beam-charged glow: BUILDING hit once by a deflected beam pulses yellow before bursting
+        if (block.type === 'BUILDING' && (block.chargeHits ?? 0) >= 1) {
+          ctx.globalAlpha = 0.55 + 0.45 * Math.sin(drawNow / 80);
+          ctx.fillStyle = '#ffcc00';
+          ctx.shadowColor = '#ffcc00';
+          ctx.shadowBlur = 18 * shadowScale;
+          ctx.fillRect(4, 4, block.width - 8, block.height - 8);
         }
       }
       ctx.restore();
