@@ -17,13 +17,13 @@ View your app in AI Studio: https://ai.studio/apps/ec044b0c-3c79-4297-8542-29af2
 2. Run the app:
    `npm run dev`
 
-## Debug Overlays
+## Debug Mode
 
-Two on-screen debug overlays are hidden by default. Enable them via URL parameter:
+Two on-screen overlays and console input logging are all disabled by default. Enable with a single URL parameter:
 
-| Parameter       | Effect                                                                                                                         |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `?inputDebug=1` | Show **Perf_Baseline** (FPS / frame-time stats) and **Input_Debug** (mouse / touch / slingshot state) overlays during gameplay |
-| `?inputDebug=0` | Disable overlays and clear the persisted setting                                                                               |
+| Parameter | Effect |
+| --------- | ------ |
+| `?debug=1` | Enable debug mode: show **Perf_Baseline** (FPS / frame-time) and **Input_Debug** (mouse / touch / slingshot state) overlays, and enable `[NEON]` console logging |
+| `?debug=0` | Disable debug mode and clear the persisted setting |
 
-The setting is persisted in `localStorage` — once enabled with `?inputDebug=1`, overlays remain visible across reloads until explicitly disabled with `?inputDebug=0`.
+The setting persists in `localStorage` — once enabled with `?debug=1`, it stays active across reloads until explicitly cleared with `?debug=0`.

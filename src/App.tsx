@@ -41,9 +41,9 @@ const TOUCH_SLINGSHOT_RESISTANCE = 0.3;
 const TOUCH_INPUT_VELOCITY_SMOOTHING = 0.55;
 const INPUT_WATCHDOG_RELEASE_MS = 280;
 const INPUT_WATCHDOG_HARD_RELEASE_MS = 1200;
-const INPUT_DEBUG_LOG_PARAM = 'inputDebug';
-const INPUT_DEBUG_STORAGE_KEY = 'neon:input-debug-log';
-const INPUT_DEBUG_BOOT_LOGGED_STORAGE_KEY = 'neon:input-debug-boot-logged';
+const INPUT_DEBUG_LOG_PARAM = 'debug';
+const INPUT_DEBUG_STORAGE_KEY = 'neon:debug';
+const INPUT_DEBUG_BOOT_LOGGED_STORAGE_KEY = 'neon:debug-boot-logged';
 const INPUT_DEBUG_MIN_LOG_INTERVAL_MS = 120;
 
 const VFX_PARTICLE_DESKTOP_MULTIPLIER = 0.75;
@@ -1086,7 +1086,7 @@ export default function App() {
     if (enabled) {
       const hasBootLogged = window.sessionStorage.getItem(INPUT_DEBUG_BOOT_LOGGED_STORAGE_KEY) === '1';
       if (!hasBootLogged) {
-        console.info('[NEON][InputDebug] enabled. Disable with ?inputDebug=0');
+        console.info('[NEON][debug] enabled. Disable with ?debug=0');
         logInputDebug('logging-enabled', {
           source: param === '1' ? 'query' : 'storage',
         });
