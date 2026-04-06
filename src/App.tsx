@@ -5240,7 +5240,8 @@ export default function App() {
       ctx.save();
       ctx.translate(a.x, a.y);
       ctx.rotate(a.rotation);
-      if (!isMobile) ctx.shadowBlur = 10;
+      if (isMobile) ctx.shadowBlur = 0;
+      else ctx.shadowBlur = 10;
 
       const isLarge = a.size > 35;
       if (!isMobile) ctx.shadowColor = isLarge ? '#00ffcc' : '#888';
@@ -5256,6 +5257,12 @@ export default function App() {
         else ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
       }
       ctx.closePath();
+      // On mobile fill the asteroid interior with a near-black color so the
+      // solid look is intentional rather than an artifact of frame persistence.
+      if (isMobile) {
+        ctx.fillStyle = isLarge ? 'rgba(0, 18, 12, 0.92)' : 'rgba(8, 8, 8, 0.92)';
+        ctx.fill();
+      }
       ctx.stroke();
 
       // Inner wireframe for large asteroids
