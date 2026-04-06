@@ -15,7 +15,7 @@ export const getStageLabelFromWave = (wave: number): string => {
 };
 
 export const isSurvivalStage = (stage: number): boolean => {
-  return stage === 2 || stage === 3 || stage === 4;
+  return stage === 2 || stage === 3;
 };
 
 export const getSurvivalDurationFromStage = (stage: number): number => {

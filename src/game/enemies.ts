@@ -144,23 +144,22 @@ export const buildWaveEnemies = (
       enemies.push(turret);
     }
   } else if (stage === 4) {
-    // Stage 4 "Chase": V-wedge formation attack.
-    // The tip (interceptor) enters first; inner scouts and outer heavies unfold on either side
-    // with staggered entry delays. Once all reach IN_FORMATION, the existing formation dive
-    // system drives coordinated leader + wingman attack runs automatically.
-    // The survival-spawn system in App.tsx fills the pressure gap as formation members are killed.
+    // Stage 4 "Chase": V-wedge formation from the top + pincer pair from the sides.
+    // Together they form a 7-enemy encounter. Wave clears when all are killed.
+    // The tip (interceptor) enters first; scouts and heavies unfold; side interceptors close in.
     const cx = CANVAS_WIDTH / 2;
-    const vSlots: { fx: number; fy: number; type: number; delay: number }[] = [
-      { fx: cx,        fy: 120, type: 1, delay: 0   },  // tip — interceptor, leads the V
-      { fx: cx - 95,   fy:  90, type: 0, delay: 200 },  // left inner — scout
-      { fx: cx + 95,   fy:  90, type: 0, delay: 200 },  // right inner — scout
-      { fx: cx - 195,  fy:  62, type: 2, delay: 400 },  // left outer — heavy
-      { fx: cx + 195,  fy:  62, type: 2, delay: 400 },  // right outer — heavy
+    const vSlots: { fx: number; fy: number; type: number; delay: number; path: { x: number; y: number }[] }[] = [
+      { fx: cx,        fy: 120, type: 1, delay:   0, path: [{ x: cx,        y: -80 }, { x: cx,        y: 120 }] },
+      { fx: cx - 95,   fy:  90, type: 0, delay: 200, path: [{ x: cx - 95,   y: -80 }, { x: cx - 95,   y:  90 }] },
+      { fx: cx + 95,   fy:  90, type: 0, delay: 200, path: [{ x: cx + 95,   y: -80 }, { x: cx + 95,   y:  90 }] },
+      { fx: cx - 195,  fy:  62, type: 2, delay: 400, path: [{ x: cx - 195,  y: -80 }, { x: cx - 195,  y:  62 }] },
+      { fx: cx + 195,  fy:  62, type: 2, delay: 400, path: [{ x: cx + 195,  y: -80 }, { x: cx + 195,  y:  62 }] },
+      // Pincer: interceptors arrive from the sides
+      { fx:  90,              fy: 210, type: 1, delay: 600, path: [{ x: -60,              y: 210 }, { x:  90,             y: 210 }] },
+      { fx: CANVAS_WIDTH - 90, fy: 210, type: 1, delay: 600, path: [{ x: CANVAS_WIDTH + 60, y: 210 }, { x: CANVAS_WIDTH - 90, y: 210 }] },
     ];
-    vSlots.forEach(({ fx, fy, type, delay }) => {
-      // Path: [off-screen start, formation slot] — ENTERING state flies from y=-80 to fy.
-      // originX/originY (from fx/fy args) is used by IN_FORMATION lerp to hold position.
-      enemies.push(createEnemy(fx, fy, type, delay, [{ x: fx, y: -80 }, { x: fx, y: fy }]));
+    vSlots.forEach(({ fx, fy, type, delay, path }) => {
+      enemies.push(createEnemy(fx, fy, type, delay, path));
     });
   } else if (stage === 5) {
     for (let i = 0; i < 15; i++) {
