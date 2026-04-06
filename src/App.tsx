@@ -5282,6 +5282,8 @@ export default function App() {
       ctx.shadowBlur = 10 * shadowScale;
       ctx.shadowColor = '#00ffcc';
       ctx.fillStyle = '#00ffcc';
+      ctx.beginPath();
+      ctx.arc(0, 0, 2, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     });
@@ -5320,7 +5322,7 @@ export default function App() {
       ctx.translate(obs.x, obs.y);
 
       const color = obs.color;
-      ctx.shadowBlur = isFinalFrontStage ? 10 : 15;
+      ctx.shadowBlur = (isFinalFrontStage ? 10 : 15) * shadowScale;
       ctx.shadowColor = color;
       ctx.strokeStyle = color;
       ctx.lineWidth = isFinalFrontStage ? 4 : 3;
@@ -5934,7 +5936,7 @@ export default function App() {
         // Boss Rendering
         const color = enemy.bossType === BossType.LASER ? '#00ffcc' : '#ff3366';
         const pulse = Math.sin(drawNow / 150) * 10;
-        ctx.shadowBlur = isMinimalBossFx ? 7 : isReducedBossFx ? 11 : 15;
+        ctx.shadowBlur = (isMinimalBossFx ? 7 : isReducedBossFx ? 11 : 15) * shadowScale;
         ctx.shadowColor = color;
         ctx.strokeStyle = color;
         ctx.lineWidth = 4;
@@ -5998,7 +6000,7 @@ export default function App() {
             ctx.save();
             ctx.lineWidth = (isMinimalBossFx ? 5 : isReducedBossFx ? 6.5 : 8) + Math.sin(drawNow / 50) * (isMinimalBossFx ? 2 : isReducedBossFx ? 3 : 4);
             ctx.strokeStyle = isMinimalBossFx ? 'rgba(0, 255, 255, 0.82)' : isReducedBossFx ? 'rgba(0, 255, 255, 0.9)' : '#00ffff';
-            ctx.shadowBlur = isMinimalBossFx ? 8 : isReducedBossFx ? 14 : 20;
+            ctx.shadowBlur = (isMinimalBossFx ? 8 : isReducedBossFx ? 14 : 20) * shadowScale;
             ctx.shadowColor = '#00ffff';
             for (let i = 0; i < laserCount; i++) {
               const laserAngle = angle + (i * Math.PI * 2 / laserCount);
@@ -6068,7 +6070,7 @@ export default function App() {
         const color = '#ffcc00';
         ctx.strokeStyle = color;
         ctx.shadowColor = color;
-        ctx.shadowBlur = 15;
+        ctx.shadowBlur = 15 * shadowScale;
         ctx.lineWidth = 3;
 
         ctx.beginPath();
@@ -6102,7 +6104,7 @@ export default function App() {
               ctx.save();
               ctx.strokeStyle = color;
               ctx.lineWidth = 3;
-              ctx.shadowBlur = 6;
+              ctx.shadowBlur = 6 * shadowScale;
               ctx.shadowColor = glowColor;
               ctx.beginPath();
               t.segments.forEach((seg, i) => {
@@ -6126,7 +6128,7 @@ export default function App() {
               }
 
               // Glow
-              ctx.shadowBlur = 15;
+              ctx.shadowBlur = 15 * shadowScale;
               ctx.shadowColor = glowColor;
 
               // Organic segment
@@ -6154,7 +6156,7 @@ export default function App() {
             ctx.save();
             ctx.translate(tip.x, tip.y);
             ctx.fillStyle = '#ffffff';
-            ctx.shadowBlur = isMinimalBossFx ? 10 : 20;
+            ctx.shadowBlur = (isMinimalBossFx ? 10 : 20) * shadowScale;
             ctx.shadowColor = '#ffffff';
             ctx.beginPath();
             ctx.arc(0, 0, 5 + Math.sin(time * 10) * 3, 0, Math.PI * 2);
@@ -6167,7 +6169,7 @@ export default function App() {
           ctx.translate(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
           const coreHue = (time * 100) % 360;
           ctx.fillStyle = `hsla(${coreHue}, 90%, 50%, 1)`;
-          ctx.shadowBlur = isMinimalBossFx ? 14 : 30;
+          ctx.shadowBlur = (isMinimalBossFx ? 14 : 30) * shadowScale;
           ctx.shadowColor = `hsla(${coreHue}, 90%, 50%, 0.8)`;
           ctx.beginPath();
           ctx.arc(0, 0, 30 + Math.sin(time * 8) * 5, 0, Math.PI * 2);
@@ -6208,7 +6210,7 @@ export default function App() {
       const colors = ['#ffcc00', '#ff33cc', '#33ccff', '#ff0000'];
       const color = colors[enemy.type] || '#ffcc00';
 
-      ctx.shadowBlur = 15;
+      ctx.shadowBlur = 15 * shadowScale;
       ctx.shadowColor = color;
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
