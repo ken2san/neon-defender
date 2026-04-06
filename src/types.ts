@@ -9,6 +9,8 @@ export interface Bullet {
   size?: number;
   color?: string;
   isHoming?: boolean;
+  isBeam?: boolean;
+  deflected?: boolean;
 }
 
 export interface Enemy {
@@ -129,7 +131,7 @@ export interface Obstacle {
   y: number;
   width: number;
   height: number;
-  type: 'BUILDING' | 'WALL' | 'PILLAR' | 'TENTACLE' | 'TURRET_BLOCK' | 'WINDMILL';
+  type: 'BUILDING' | 'WALL' | 'PILLAR' | 'TENTACLE' | 'TURRET_BLOCK' | 'WINDMILL' | 'BEAM_TURRET';
   hp: number;
   maxHp: number;
   color: string;

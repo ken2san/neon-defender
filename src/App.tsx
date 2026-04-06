@@ -860,15 +860,16 @@ export default function App() {
       tentacleChance = 0; // No tentacles — too much at once with boss fight
     } else if (currentStage === 4) {
       // Stage 4 "Chase": canyon corridor patterns.
-      // Structured layout pool — walls force lane choices, destructibles reward aggressive play.
-      // No random density; no tentacles. Distinct from Stage 3's windmill/turret system.
-      const layouts: (null | 'WALL' | 'BUILDING')[][] = [
+      // BEAM_TURRET rows fire slow beams downward — deflect with slingshot shield to destroy them.
+      const layouts: (null | 'WALL' | 'BUILDING' | 'BEAM_TURRET')[][] = [
         ['WALL', 'WALL', null, null, null, null, null, null, null, null],          // left flank
         [null, null, null, null, null, null, null, null, 'WALL', 'WALL'],          // right flank
         [null, null, null, 'WALL', 'WALL', 'WALL', 'WALL', null, null, null],     // centre divider
         ['WALL', 'WALL', null, null, 'WALL', 'WALL', null, null, 'WALL', 'WALL'], // triple narrow lanes
         [null, 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', null], // breakable barrier
         ['WALL', null, null, null, null, null, null, null, null, 'WALL'],          // outer walls (wide open centre)
+        ['BEAM_TURRET', null, null, null, null, null, null, null, null, 'BEAM_TURRET'], // twin cannons
+        ['BEAM_TURRET', 'WALL', null, null, null, null, null, null, 'WALL', 'BEAM_TURRET'], // cannons behind walls
         [null, null, null, null, null, null, null, null, null, null],              // breather
         [null, null, null, null, null, null, null, null, null, null],              // breather
         [null, null, null, null, null, null, null, null, null, null],              // breather
@@ -884,9 +885,10 @@ export default function App() {
           width: blockWidth,
           height: blockHeight,
           type: slotType,
-          hp: slotType === 'WALL' ? 999 : 10,
-          maxHp: slotType === 'WALL' ? 999 : 10,
-          color: slotType === 'WALL' ? '#1a1a2e' : '#33ccff',
+          hp: slotType === 'WALL' ? 999 : slotType === 'BEAM_TURRET' ? 50 : 10,
+          maxHp: slotType === 'WALL' ? 999 : slotType === 'BEAM_TURRET' ? 50 : 10,
+          color: slotType === 'WALL' ? '#1a1a2e' : slotType === 'BEAM_TURRET' ? '#00ffdd' : '#33ccff',
+          lastShotTime: 0,
         });
       }
       return;
@@ -2935,6 +2937,7 @@ export default function App() {
     if (shieldState.active && !isSlingshotAttacking && !isOverdriveActiveRef.current && isSlingshotMode.current && isDragging) {
       const ENERGY_WALL_BULLET_GAIN = 2; // ~50 bullets to full; each of 4 stages = ~12 bullets
       enemyBullets.current = enemyBullets.current.filter(b => {
+        if (b.isBeam) return true; // Beams are deflected by shield, not absorbed
         if (!doesShieldCatchPoint(b.x, b.y, 20)) return true;
         if (odReadyRef.current) {
           activateOverdrive();
@@ -2973,9 +2976,9 @@ export default function App() {
 
     // Maze Generation (Canyon)
     // Stage 3: slow (windmill/turret choreography needs read time)
-    // Stage 4: moderate (canyon chase — faster than S3, but corridors must stay readable)
+    // Stage 4: moderate canyon chase — faster than S3, readable corridors
     // Stage 5+: fast (boss wave, obstacles are background pressure not puzzle)
-    const scrollSpeed = (currentStage === 3 ? 0.65 : currentStage === 4 ? 1.4 : 3) * worldSpeedScale;
+    const scrollSpeed = (currentStage === 3 ? 0.65 : currentStage === 4 ? 0.9 : 3) * worldSpeedScale;
     lastBlockRowY.current += scrollSpeed;
     // Stage 5 spawns rows half as often — high scroll speed already brings blocks fast enough.
     const rowSpawnThreshold = currentStage === 5 ? 200 : 100;
@@ -3206,6 +3209,52 @@ export default function App() {
           size: 5,
         });
       });
+    }
+
+    // BEAM_TURRET: fires a slow charged beam straight down every 3.5s.
+    // The slingshot shield deflects it back — reflecting beam destroys the turret (Stage 4 gimmick).
+    {
+      const now = Date.now();
+      blocks.current.forEach(block => {
+        if (block.type !== 'BEAM_TURRET' || block.hp <= 0) return;
+        if (block.y < -block.height || block.y > CANVAS_HEIGHT) return;
+        if (now - (block.lastShotTime ?? 0) < 3500) return;
+        block.lastShotTime = now;
+        enemyBullets.current.push({
+          x: block.x + block.width / 2 - 5,
+          y: block.y + block.height,
+          vx: 0,
+          vy: 2.2,
+          damage: 25,
+          color: '#00ffdd',
+          size: 9,
+          isBeam: true,
+        });
+      });
+    }
+
+    // Deflected beam vs blocks: a reflected beam (vy < 0) destroys what it hits.
+    for (let bi = enemyBullets.current.length - 1; bi >= 0; bi--) {
+      const b = enemyBullets.current[bi];
+      if (!b.deflected || !b.isBeam || (b.vy ?? 0) >= 0) continue;
+      let hitBlock = false;
+      for (let ki = 0; ki < blocks.current.length; ki++) {
+        const block = blocks.current[ki];
+        if (block.hp <= 0 || block.type === 'WALL') continue;
+        if (b.x > block.x && b.x < block.x + block.width &&
+            b.y > block.y && b.y < block.y + block.height) {
+          block.hp -= block.type === 'BEAM_TURRET' ? 999 : 30;
+          if (block.hp <= 0) {
+            createExplosion(block.x + block.width / 2, block.y + block.height / 2,
+              block.type === 'BEAM_TURRET' ? '#00ffdd' : block.color, 40);
+            audio.playExplosion(block.x + block.width / 2);
+            setScore(s => s + (block.type === 'BEAM_TURRET' ? 800 : 200));
+          }
+          hitBlock = true;
+          break;
+        }
+      }
+      if (hitBlock) enemyBullets.current.splice(bi, 1);
     }
 
     blocks.current = blocks.current.filter(b => b.y < CANVAS_HEIGHT + 100);
@@ -3617,7 +3666,7 @@ export default function App() {
       b.x += vx * worldSpeedScale * dt;
       b.y += vy * stageFlowScale * dt;
 
-      if (b.y > CANVAS_HEIGHT + 20 || b.x < -20 || b.x > CANVAS_WIDTH + 20) {
+      if (b.y > CANVAS_HEIGHT + 20 || b.y < -30 || b.x < -20 || b.x > CANVAS_WIDTH + 20) {
         enemyBulletList.splice(i, 1);
       }
     }
@@ -4640,6 +4689,21 @@ export default function App() {
         handleGraze(bulletCenterX, bulletCenterY);
       }
 
+      // Beam deflection: slingshot shield reflects BEAM_TURRET beams back upward.
+      // Deflected beams skip all player-damage logic and can destroy BEAM_TURRET blocks.
+      if (bullet.isBeam) {
+        if (!bullet.deflected && doesShieldCatchPoint(bulletCenterX, bulletCenterY, 8)) {
+          bullet.vy = -Math.abs(bullet.vy ?? 2.2);
+          bullet.deflected = true;
+          emitSlingshotShieldImpact(bulletCenterX, bulletCenterY, 1.8);
+        } else if (!bullet.deflected && bullet.x > px && bullet.x < px + pw && bullet.y > py && bullet.y < py + ph) {
+          playerHit = true;
+          eBullets.splice(i, 1);
+        }
+        // Deflected beams travel upward — cleared by y < -30 removal in movement loop
+        continue;
+      }
+
       if (doesShieldCatchPoint(bulletCenterX, bulletCenterY, 4)) {
           emitSlingshotShieldImpact(bulletCenterX, bulletCenterY, 0.9);
           overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + 2);
@@ -5575,6 +5639,43 @@ export default function App() {
         ctx.beginPath();
         ctx.arc(wcx, wcy, 5, 0, Math.PI * 2);
         ctx.fill();
+      } else if (block.type === 'BEAM_TURRET') {
+        // Canyon beam cannon — fires downward; deflect with slingshot shield to destroy.
+        const tcx = block.width / 2;
+        const tcy = block.height / 2;
+        const timeSinceShot = drawNow - (block.lastShotTime ?? 0);
+        const chargeProgress = Math.min(1, timeSinceShot / 3500);
+        ctx.fillStyle = 'rgba(0, 20, 30, 0.9)';
+        ctx.fillRect(0, 0, block.width, block.height);
+        const glow = (8 + chargeProgress * 18) * shadowScale;
+        ctx.shadowBlur = glow;
+        ctx.shadowColor = '#00ffdd';
+        ctx.strokeStyle = `rgba(0, 255, 221, ${0.35 + chargeProgress * 0.65})`;
+        ctx.lineWidth = 2;
+        const hexR = Math.min(block.width, block.height) * 0.28;
+        ctx.beginPath();
+        for (let k = 0; k < 6; k++) {
+          const a = (k * Math.PI * 2) / 6 + Math.PI / 6;
+          if (k === 0) ctx.moveTo(tcx + Math.cos(a) * hexR, tcy + Math.sin(a) * hexR);
+          else ctx.lineTo(tcx + Math.cos(a) * hexR, tcy + Math.sin(a) * hexR);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        // Barrel pointing down
+        ctx.lineWidth = 4;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(tcx, tcy);
+        ctx.lineTo(tcx, tcy + hexR + 14);
+        ctx.stroke();
+        // Charge tip pulse when nearly ready
+        if (chargeProgress >= 0.85) {
+          ctx.fillStyle = '#00ffdd';
+          ctx.shadowBlur = 22 * shadowScale;
+          ctx.beginPath();
+          ctx.arc(tcx, tcy + hexR + 14, 3 + Math.sin(drawNow / 55) * 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
       } else if (block.type === 'TENTACLE' && block.segments) {
         // Draw Tentacle Segments (R-Type style)
         ctx.lineWidth = 4;
@@ -6002,13 +6103,27 @@ export default function App() {
     ctx.shadowBlur = 0;
 
     // Enemy Bullets
-    ctx.fillStyle = '#ff9900'; // Changed to Orange for better visibility against player's pink Overdrive
-    ctx.shadowColor = '#ff9900';
     ctx.shadowBlur = 10 * shadowScale;
     enemyBullets.current.forEach((b) => {
-      ctx.beginPath();
-      ctx.arc(b.x + 2, b.y + 6, 4, 0, Math.PI * 2);
-      ctx.fill();
+      if (b.isBeam) {
+        // Beam: elongated teal bar, turns white when deflected
+        const beamColor = b.deflected ? '#ffffff' : '#00ffdd';
+        ctx.shadowColor = beamColor;
+        ctx.shadowBlur = 18 * shadowScale;
+        ctx.fillStyle = beamColor;
+        ctx.save();
+        ctx.translate(b.x + 5, b.y + 5);
+        if (b.deflected) ctx.rotate(Math.PI); // flip visual when going upward
+        ctx.fillRect(-4, -14, 8, 28);
+        ctx.restore();
+        ctx.shadowBlur = 10 * shadowScale;
+      } else {
+        ctx.fillStyle = '#ff9900';
+        ctx.shadowColor = '#ff9900';
+        ctx.beginPath();
+        ctx.arc(b.x + 2, b.y + 6, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
     });
     ctx.shadowBlur = 0;
 
