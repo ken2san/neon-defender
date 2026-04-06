@@ -859,11 +859,37 @@ export default function App() {
       destructibleDensity = 0.08;
       tentacleChance = 0; // No tentacles — too much at once with boss fight
     } else if (currentStage === 4) {
-      wallDensity = 0.06 + (waveRef.current - 7) * 0.02;
-      destructibleDensity = 0.12 + (waveRef.current - 7) * 0.03;
-      // Chase stage: reduce tentacle chance under load
-      const isChaseLoad = renderLoadTierRef.current;
-      tentacleChance = isChaseLoad >= 2 ? 0.01 : isChaseLoad === 1 ? 0.02 : 0.05;
+      // Stage 4 "Chase": canyon corridor patterns.
+      // Structured layout pool — walls force lane choices, destructibles reward aggressive play.
+      // No random density; no tentacles. Distinct from Stage 3's windmill/turret system.
+      const layouts: (null | 'WALL' | 'BUILDING')[][] = [
+        ['WALL', 'WALL', null, null, null, null, null, null, null, null],          // left flank
+        [null, null, null, null, null, null, null, null, 'WALL', 'WALL'],          // right flank
+        [null, null, null, 'WALL', 'WALL', 'WALL', 'WALL', null, null, null],     // centre divider
+        ['WALL', 'WALL', null, null, 'WALL', 'WALL', null, null, 'WALL', 'WALL'], // triple narrow lanes
+        [null, 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', null], // breakable barrier
+        ['WALL', null, null, null, null, null, null, null, null, 'WALL'],          // outer walls (wide open centre)
+        [null, null, null, null, null, null, null, null, null, null],              // breather
+        [null, null, null, null, null, null, null, null, null, null],              // breather
+        [null, null, null, null, null, null, null, null, null, null],              // breather
+      ];
+      const layout = layouts[Math.floor(Math.random() * layouts.length)];
+      for (let i = 0; i < 10; i++) {
+        const slotType = layout[i];
+        if (!slotType) continue;
+        blocks.current.push({
+          id: Date.now() + i,
+          x: i * blockWidth,
+          y: rowY,
+          width: blockWidth,
+          height: blockHeight,
+          type: slotType,
+          hp: slotType === 'WALL' ? 999 : 10,
+          maxHp: slotType === 'WALL' ? 999 : 10,
+          color: slotType === 'WALL' ? '#1a1a2e' : '#33ccff',
+        });
+      }
+      return;
     }
 
     for (let i = 0; i < 10; i++) {
@@ -4906,7 +4932,9 @@ export default function App() {
     }
 
     // Ambush System (VS Style constant action)
-    if (gameState === 'PLAYING' && !isWarping.current && !isTimeBasedStage && currentStage > 1) {
+    // Stage 4 excluded: formation-kill wave needs clean enemy count for wave-clear; ambush enemies
+    // return to off-screen origin and stay alive forever, preventing wave completion.
+    if (gameState === 'PLAYING' && !isWarping.current && !isTimeBasedStage && currentStage > 1 && currentStage !== 4) {
       ambushTimer.current += dt * (1000 / 60) * timeScale.current;
       const aliveCount = enemies.current.filter(e => e.alive).length;
       const isBossWave = enemies.current.some(e => e.alive && e.isBoss);
