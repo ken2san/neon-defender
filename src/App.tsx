@@ -136,6 +136,10 @@ export default function App() {
   const [isTouchDevice, setIsTouchDevice] = useState(false);
   const TUTORIAL_SEEN_KEY = 'neon:tutorial-seen';
   const [showTutorial, setShowTutorial] = useState(false);
+  const showDebugOverlay = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get(INPUT_DEBUG_LOG_PARAM) === '1' || window.localStorage.getItem(INPUT_DEBUG_STORAGE_KEY) === '1';
+  })[0];
   const [hasWingman, setHasWingman] = useState(false);
   const wingmanRef = useRef(false);
   const wingmanPos = useRef({ x: 0, y: 0 });
@@ -6887,7 +6891,7 @@ export default function App() {
           ))}
         </div>
 
-        {gameState === 'PLAYING' && (
+        {showDebugOverlay && gameState === 'PLAYING' && (
           <div className="absolute bottom-4 right-4 pointer-events-none bg-black/65 border border-[#00ffcc]/30 rounded px-2 py-1.5 text-[9px] leading-tight text-[#bfffee] font-mono z-30">
             <div className="text-[8px] text-[#00ffcc] uppercase tracking-widest mb-1">Perf_Baseline</div>
             <div>FPS p50 {perfStats.fpsP50.toFixed(1)} | p95 {perfStats.fpsP95.toFixed(1)}</div>
@@ -6896,7 +6900,7 @@ export default function App() {
           </div>
         )}
 
-        {import.meta.env.DEV && gameState === 'PLAYING' && (
+        {showDebugOverlay && gameState === 'PLAYING' && (
           <div className="absolute bottom-22 right-4 pointer-events-none bg-black/65 border border-[#ffcc00]/30 rounded px-2 py-1.5 text-[9px] leading-tight text-[#ffe9b3] font-mono z-30">
             <div className="text-[8px] text-[#ffcc00] uppercase tracking-widest mb-1">Input_Debug</div>
             <div>Mouse:{isMouseDown.current ? '1' : '0'} Touch:{isTouching.current ? '1' : '0'} Virtual:{isVirtualDragActive.current ? '1' : '0'}</div>
