@@ -7334,6 +7334,7 @@ export default function App() {
         stageProgress={stageProgress}
         wallMode={wallMode}
         onOpenWheel={openWheel}
+        showWallMode={gameState === 'PLAYING'}
       />
 
       {/* Wall mode selection wheel — opens on Tab (PC) or HUD button (mobile) */}
