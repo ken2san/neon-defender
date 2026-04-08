@@ -4911,6 +4911,9 @@ export default function App() {
     }
 
     const eBullets = enemyBullets.current;
+    // Accumulators for guard-window bullet absorption — flush once after loop.
+    let guardHpGain = 0;
+    let guardOdGain = 0;
     for (let i = eBullets.length - 1; i >= 0; i--) {
       const bullet = eBullets[i];
       const bulletCenterX = bullet.x + 2;
@@ -4957,12 +4960,12 @@ export default function App() {
       if (doesShieldCatchPoint(bulletCenterX, bulletCenterY, 4)) {
           emitSlingshotShieldImpact(bulletCenterX, bulletCenterY, 0.9);
           if (wallModeRef.current === 'HP_ABSORB' && integrityRef.current < 100) {
-            const healed = Math.min(100, integrityRef.current + 1); // +1 integrity, same as energy-wall
+            const healed = Math.min(100, integrityRef.current + 1);
+            guardHpGain += healed - integrityRef.current;
             integrityRef.current = healed;
-            setIntegrity(healed);
-          } else if (wallModeRef.current !== 'HP_ABSORB' || integrityRef.current >= 100) {
+          } else {
             overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + 2);
-            setOverdrive(overdriveGauge.current);
+            guardOdGain += 2;
           }
           eBullets.splice(i, 1);
           continue;
@@ -4974,6 +4977,9 @@ export default function App() {
         eBullets.splice(i, 1);
       }
     }
+    // Flush guard-window absorption state — single React render regardless of how many bullets were caught.
+    if (guardHpGain > 0) setIntegrity(integrityRef.current);
+    if (guardOdGain > 0) setOverdrive(overdriveGauge.current);
 
     // Emergency spacing: if durable enemies and bullets overfill the local area, clear a minimal escape lane.
     if (
