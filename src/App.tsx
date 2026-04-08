@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Rocket, Trophy, Play, RotateCcw, Loader2, Zap, Maximize2, Shield, Cpu, Heart, Users, Activity, MousePointer2 } from 'lucide-react';
 import { generateGameAssets } from './services/assetGenerator';
@@ -2110,14 +2110,14 @@ export default function App() {
     activeEffects.current['SHIELD'] = Math.max(activeEffects.current['SHIELD'] || 0, Date.now() + 3000);
   };
 
-  const openWheel = () => {
+  const openWheel = useCallback(() => {
     if (isWheelOpenRef.current) return;
     isWheelOpenRef.current = true;
     pauseStartTime.current = Date.now();
     setIsWheelOpen(true);
-  };
+  }, []);
 
-  const closeWheel = () => {
+  const closeWheel = useCallback(() => {
     if (!isWheelOpenRef.current) return;
     if (isOverdriveActiveRef.current && pauseStartTime.current > 0) {
       overdriveEndTime.current += (Date.now() - pauseStartTime.current);
@@ -2125,7 +2125,7 @@ export default function App() {
     pauseStartTime.current = 0;
     isWheelOpenRef.current = false;
     setIsWheelOpen(false);
-  };
+  }, []);
 
   // Game Loop
   const update = () => {

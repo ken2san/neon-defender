@@ -203,7 +203,7 @@ export default function TutorialOverlay({ isTouchDevice, onClose }: Props) {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="absolute inset-0 z-200 flex items-center justify-center bg-black/85 backdrop-blur-sm"
+      className="absolute inset-0 z-200 flex items-center justify-center bg-black/92"
       onClick={onClose}
     >
       <motion.div
