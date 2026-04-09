@@ -4608,8 +4608,7 @@ export default function App() {
     }
 
     // Collision detection
-    const aliveEnemies = enemies.current.filter(e => e.alive);
-    const hasAliveBoss = aliveEnemies.some(e => e.isBoss);
+    const hasAliveBoss = enemies.current.some(e => e.alive && e.isBoss);
     if (!hasAliveBoss) {
       repairDropsDuringBossRef.current = 0;
     }
@@ -4618,8 +4617,9 @@ export default function App() {
     for (let i = playerBullets.length - 1; i >= 0; i--) {
       const bullet = playerBullets[i];
 
-      for (let j = 0; j < aliveEnemies.length; j++) {
-        const enemy = aliveEnemies[j];
+      for (let j = 0; j < enemies.current.length; j++) {
+        const enemy = enemies.current[j];
+        if (!enemy.alive) continue;
         if (enemy.state === 'ENTERING') continue; // Immune while forming up (Galaga-style)
         if (bullet.x > enemy.x && bullet.x < enemy.x + enemy.width &&
             bullet.y > enemy.y && bullet.y < enemy.y + enemy.height) {
@@ -4644,8 +4644,8 @@ export default function App() {
 
           // Tesla Arc (Chain Lightning)
           if (chainLightningRef.current > 0) {
-            const nearby = aliveEnemies.filter(e => e !== enemy);
-            nearby.forEach(e => {
+            enemies.current.forEach(e => {
+              if (!e.alive || e === enemy) return;
               const edx = enemy.x - e.x;
               const edy = enemy.y - e.y;
               const edist = Math.sqrt(edx * edx + edy * edy);
@@ -4735,15 +4735,14 @@ export default function App() {
           if (isOverdriveActiveRef.current) {
             createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ff3366', 50);
             // Damage nearby enemies
-            aliveEnemies.forEach(other => {
-              if (other.alive && other !== enemy) {
-                const dx = (other.x + other.width/2) - (enemy.x + enemy.width/2);
-                const dy = (other.y + other.height/2) - (enemy.y + enemy.height/2);
-                const dist = Math.sqrt(dx*dx + dy*dy);
-                if (dist < 150) {
-                  other.health = (other.health || 0) - 50;
-                  if (other.health <= 0) other.alive = false;
-                }
+            enemies.current.forEach(other => {
+              if (!other.alive || other === enemy) return;
+              const dx = (other.x + other.width/2) - (enemy.x + enemy.width/2);
+              const dy = (other.y + other.height/2) - (enemy.y + enemy.height/2);
+              const dist = Math.sqrt(dx*dx + dy*dy);
+              if (dist < 150) {
+                other.health = (other.health || 0) - 50;
+                if (other.health <= 0) other.alive = false;
               }
             });
           }
@@ -4846,8 +4845,9 @@ export default function App() {
 
     let playerHit = false;
 
-    for (let i = 0; i < aliveEnemies.length; i++) {
-      const enemy = aliveEnemies[i];
+    for (let i = 0; i < enemies.current.length; i++) {
+      const enemy = enemies.current[i];
+      if (!enemy.alive) continue;
       const inPlayerBox = isSlingshotAttacking ? (
         enemy.x < sweptRight &&
         enemy.x + enemy.width > sweptLeft &&
@@ -5011,7 +5011,7 @@ export default function App() {
       const playerCX = playerPos.current.x + PLAYER_WIDTH / 2;
       const playerCY = playerPos.current.y + PLAYER_HEIGHT / 2;
 
-      const hardEnemies = aliveEnemies.filter((enemy) => {
+      const hardEnemies = enemies.current.filter((enemy) => {
         if (!enemy.alive || enemy.isBoss) return false;
         const isDurableType = enemy.type >= 2 || enemy.type === 4;
         if (!isDurableType) return false;
@@ -5199,8 +5199,11 @@ export default function App() {
       }
     }
 
-    // Prune dead enemies to prevent unbounded array growth (SWARM boss spawns every 1-2s)
-    if (enemies.current.length > 24) {
+    // Prune dead enemies to prevent unbounded array growth.
+    // Survival stages keep visible enemy counts low (≤5) — prune aggressively so dead
+    // entries don't inflate the array and slow per-frame iteration over time.
+    const enemyPruneThreshold = isSurvivalStage(currentStage) ? 10 : 24;
+    if (enemies.current.length > enemyPruneThreshold) {
       enemies.current = enemies.current.filter(e => e.alive);
     }
 
@@ -5698,18 +5701,19 @@ export default function App() {
       ctx.restore();
     });
 
-    // Draw Scraps
-    scraps.current.forEach(s => {
-      ctx.save();
-      ctx.translate(s.x, s.y);
-      // Scraps are 2px dots — shadow is invisible on mobile and costs shadow-blur per dot.
-      if (!isMobile) { ctx.shadowBlur = 10; ctx.shadowColor = '#00ffcc'; }
+    // Draw Scraps — all share the same color; batch into one path to eliminate per-dot save/restore.
+    if (scraps.current.length > 0) {
+      if (!isMobile) { ctx.shadowBlur = 8; ctx.shadowColor = '#00ffcc'; }
       ctx.fillStyle = '#00ffcc';
       ctx.beginPath();
-      ctx.arc(0, 0, 2, 0, Math.PI * 2);
+      for (let si = 0; si < scraps.current.length; si++) {
+        const s = scraps.current[si];
+        ctx.moveTo(s.x + 2, s.y);
+        ctx.arc(s.x, s.y, 2, 0, Math.PI * 2);
+      }
       ctx.fill();
-      ctx.restore();
-    });
+      if (!isMobile) ctx.shadowBlur = 0;
+    }
 
     // Power-ups
     powerUps.current.forEach(p => {
