@@ -5449,8 +5449,11 @@ export default function App() {
     const ctx = offscreenCtx.current;
     if (!ctx || !offscreenCanvas.current) return;
 
-    // Clear offscreen
-    ctx.fillStyle = 'rgba(2, 2, 5, 0.3)';
+    // Clear offscreen with a semi-transparent fill to create a motion-blur / trail effect.
+    // Desktop: alpha 0.3 (70% of previous frame survives) — subtle cinematic blur at 60fps.
+    // Mobile: alpha 0.5 (50% survives) — at lower effective FPS the 0.3 value let frames
+    // accumulate visibly, making the game look blurry. 0.5 halves the accumulation time.
+    ctx.fillStyle = isMobile ? 'rgba(2, 2, 5, 0.5)' : 'rgba(2, 2, 5, 0.3)';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
     ctx.save();
@@ -5481,7 +5484,7 @@ export default function App() {
     // shadowBlur scale: tier 0 = full, tier 1 = 60%, tier 2 = 0 (off)
     // On mobile tier 0 is already reduced; desktop is unaffected until load rises.
     const shadowScale = isMobile
-      ? (drawLoadTier >= 2 ? 0 : drawLoadTier >= 1 ? 0.5 : 0.7)
+      ? (drawLoadTier >= 2 ? 0 : 0.5)  // tier 0 & 1 both 0.5 on mobile (was 0.7 / 0.5)
       : 1;
     const isChase = currentStage === 4;
     const isFinalFrontStage = currentStage === 5;
@@ -6590,7 +6593,7 @@ export default function App() {
           // Draw Lasers
           if (enemy.phase! >= 1) {
             const angle = (enemy.tractorBeamTimer! / 1000) * Math.PI;
-            const laserCount = isMinimalBossFx ? 2 : enemy.phase === 3 ? 4 : 2;
+            const laserCount = (isMinimalBossFx || isReducedBossFx) ? 2 : enemy.phase === 3 ? 4 : 2;
             ctx.save();
             ctx.lineWidth = (isMinimalBossFx ? 5 : isReducedBossFx ? 6.5 : 8) + Math.sin(drawNow / 50) * (isMinimalBossFx ? 2 : isReducedBossFx ? 3 : 4);
             ctx.strokeStyle = isMinimalBossFx ? 'rgba(0, 255, 255, 0.82)' : isReducedBossFx ? 'rgba(0, 255, 255, 0.9)' : '#00ffff';
@@ -6633,7 +6636,7 @@ export default function App() {
 
           ctx.fillStyle = gradient;
           ctx.shadowColor = '#00ffff';
-          ctx.shadowBlur = isCharging ? 5 : 20;
+          ctx.shadowBlur = (isCharging ? 5 : 20) * shadowScale;
           ctx.beginPath();
           ctx.moveTo(-20, enemy.height / 2);
           ctx.lineTo(20, enemy.height / 2);
@@ -6983,7 +6986,11 @@ export default function App() {
     ctx.restore(); // Restore from shake
 
     // Nebula Pass Effect (boss/late-stage ambience only when trippy is active)
-    const nebulaFrameDivisor = renderLoadTierRef.current === 0 ? 1 : renderLoadTierRef.current === 1 ? 2 : 3;
+    // During boss on mobile tier 1, skip 2-of-3 frames (divisor 3) instead of 1-of-2.
+    // Nebula uses createRadialGradient + screen composite — expensive for 60-frame loops.
+    const nebulaFrameDivisor = renderLoadTierRef.current === 0 ? 1
+      : (renderLoadTierRef.current === 1 && isMobile && waveHasBossRef.current) ? 3
+      : renderLoadTierRef.current === 1 ? 2 : 3;
     const shouldRenderNebula = Math.floor(drawNow / 16) % nebulaFrameDivisor === 0;
     if (trippyIntensity.current > 0.05 && shouldRenderNebula) {
       ctx.save();
