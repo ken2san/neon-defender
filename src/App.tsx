@@ -12,7 +12,7 @@ import {
   CANVAS_WIDTH, CANVAS_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT, PLAYER_SPEED,
   SLINGSHOT_THRESHOLD, GRAZE_DISTANCE, MAX_OVERDRIVE, BULLET_SPEED,
   ENEMY_DIVE_SPEED, ENEMY_BULLET_SPEED, ENEMY_ROWS, ENEMY_COLS, ENEMY_SPACING,
-  isMobile, MAX_PARTICLES, MAX_TRAILS, MAX_BULLETS, MAX_ENEMY_BULLETS, ENABLE_SHADOWS,
+  isMobile, isIOS, isIOSStandalone, MAX_PARTICLES, MAX_TRAILS, MAX_BULLETS, MAX_ENEMY_BULLETS, ENABLE_SHADOWS,
 } from './constants';
 import {
   GameState, SlingshotWallMode, Bullet, Enemy, Particle, Trail, PowerUp, Scrap, Asteroid,
@@ -438,7 +438,13 @@ export default function App() {
     };
   }, []);
 
+  const [showIosHint, setShowIosHint] = useState(false);
+
   const toggleFullscreen = () => {
+    if (isIOS) {
+      setShowIosHint(h => !h);
+      return;
+    }
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(err => {
         console.error(`Error attempting to enable full-screen mode: ${err.message}`);
@@ -7812,16 +7818,25 @@ export default function App() {
       </div>
 
       {/* Footer & Fullscreen */}
-      <div className="mt-2 md:mt-8 text-[9px] text-gray-700 uppercase tracking-[0.5em] flex items-center gap-4">
+      <div className="mt-2 md:mt-8 text-[9px] text-gray-700 uppercase tracking-[0.5em] flex flex-col items-center gap-1">
+        <div className="flex items-center gap-4">
           <span>Arcade Revision 2.5</span>
           <span className="w-1 h-1 bg-gray-800 rounded-full" />
-          <button
-            onClick={toggleFullscreen}
-            className="hover:text-white transition-colors flex items-center gap-1"
-          >
-            <Maximize2 size={10} />
-            <span>{isFullscreen ? "Exit Full" : "Fullscreen"}</span>
-          </button>
+          {!isIOSStandalone && (
+            <button
+              onClick={toggleFullscreen}
+              className="hover:text-white transition-colors flex items-center gap-1"
+            >
+              <Maximize2 size={10} />
+              <span>{isIOS ? 'Fullscreen' : (isFullscreen ? 'Exit Full' : 'Fullscreen')}</span>
+            </button>
+          )}
+        </div>
+        {showIosHint && (
+          <span className="text-[8px] text-gray-600 tracking-normal normal-case text-center">
+            Tap Safari's Share ↑ → "Add to Home Screen" for fullscreen
+          </span>
+        )}
       </div>
     </div>
   );
