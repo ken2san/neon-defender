@@ -12,38 +12,38 @@ Root cause: `enemies.current.filter(e => e.alive)` ran unconditionally every fra
 (60 calls/sec on a 45s survival wave = 2,700 ephemeral arrays). On iOS, accumulated
 GC pauses delay `setInterval(125ms)`, causing BGM to gradually slow down mid-wave.
 
-| Fix | Location |
-|---|---|
-| Remove per-frame `aliveEnemies` pre-filter; iterate `enemies.current` directly with `!alive` guard | Bullet-enemy collision loop |
-| `enemies.current.some()` instead of `filter().some()` for boss check | Same section |
-| Tesla arc chain: iterate `enemies.current` with guard instead of `aliveEnemies.filter(e => e !== enemy)` | Tesla hit handler |
-| Overdrive chain: same pattern | Overdrive explosion |
-| Player-enemy sweep collision: iterate `enemies.current` with alive guard | AABB sweep loop |
-| `hardEnemies` filter: switch to `enemies.current.filter()` (no detached variable) | Auto-space logic |
-| Survival enemy prune threshold: 24 → 10 (max 4–5 visible at once; dead ones piled up) | Enemy prune block |
-| Scrap rendering: batch all dots into one `beginPath/fill` (was N×`ctx.save/restore`) | Scrap draw loop |
+| Fix                                                                                                      | Location                    |
+| -------------------------------------------------------------------------------------------------------- | --------------------------- |
+| Remove per-frame `aliveEnemies` pre-filter; iterate `enemies.current` directly with `!alive` guard       | Bullet-enemy collision loop |
+| `enemies.current.some()` instead of `filter().some()` for boss check                                     | Same section                |
+| Tesla arc chain: iterate `enemies.current` with guard instead of `aliveEnemies.filter(e => e !== enemy)` | Tesla hit handler           |
+| Overdrive chain: same pattern                                                                            | Overdrive explosion         |
+| Player-enemy sweep collision: iterate `enemies.current` with alive guard                                 | AABB sweep loop             |
+| `hardEnemies` filter: switch to `enemies.current.filter()` (no detached variable)                        | Auto-space logic            |
+| Survival enemy prune threshold: 24 → 10 (max 4–5 visible at once; dead ones piled up)                    | Enemy prune block           |
+| Scrap rendering: batch all dots into one `beginPath/fill` (was N×`ctx.save/restore`)                     | Scrap draw loop             |
 
 ### Stage 2 entry slowdown
 
-| Fix | Cause |
-|---|---|
+| Fix                                                                           | Cause                                              |
+| ----------------------------------------------------------------------------- | -------------------------------------------------- |
 | `scraps.current = []` and `asteroids.current = []` added to `startNextWave()` | Entities from previous waves kept updating/drawing |
-| Cap fragment spawning to `maxAsteroids` (splits were bypassing the cap) | Mobile asteroid count exceeded 8/12 limit |
+| Cap fragment spawning to `maxAsteroids` (splits were bypassing the cap)       | Mobile asteroid count exceeded 8/12 limit          |
 
 ### Stage 2-2 entry jolt (wave boundary)
 
-| Fix | Cause |
-|---|---|
-| Survival spawn check: manual count loop instead of `filter().length` per frame | 60 alloc/sec in spawn throttle |
-| Game-over check: `enemies.current.some()` instead of `filter(e => e.alive)` | Unnecessary array creation |
-| Scraps cleared in wave-clear handler (pre-warp), not only in `startNextWave` | Scraps piled during 1400ms warp animation |
-| `survivalTimerRef` fixed to use `getSurvivalDurationFromStage()` (was hard-coded 30) | Spurious timer call at wave 4 entry |
-| BGM: skip `playBGM()` restart when stage hasn't changed | AGM AudioContext work at every wave boundary |
+| Fix                                                                                  | Cause                                        |
+| ------------------------------------------------------------------------------------ | -------------------------------------------- |
+| Survival spawn check: manual count loop instead of `filter().length` per frame       | 60 alloc/sec in spawn throttle               |
+| Game-over check: `enemies.current.some()` instead of `filter(e => e.alive)`          | Unnecessary array creation                   |
+| Scraps cleared in wave-clear handler (pre-warp), not only in `startNextWave`         | Scraps piled during 1400ms warp animation    |
+| `survivalTimerRef` fixed to use `getSurvivalDurationFromStage()` (was hard-coded 30) | Spurious timer call at wave 4 entry          |
+| BGM: skip `playBGM()` restart when stage hasn't changed                              | AGM AudioContext work at every wave boundary |
 
 ### Wingman position init
 
-| Fix | Cause |
-|---|---|
+| Fix                                                          | Cause                                                 |
+| ------------------------------------------------------------ | ----------------------------------------------------- |
 | `wingmanPos.current` set to player position on upgrade grant | Default `{x:0,y:0}` caused top-left spawn + slow lerp |
 
 ### Other (Phase 4, earlier)
@@ -67,6 +67,7 @@ Today: bullets and scraps are `push()`-ed and destroyed by filtering or splicing
 creating constant heap churn. Object pooling reuses dead slots.
 
 Pattern:
+
 ```ts
 // Pre-allocate
 const bulletPool: Bullet[] = Array.from({ length: 200 }, () => ({ alive: false, ...defaults }));

@@ -90,6 +90,7 @@ See [PERFORMANCE.md](PERFORMANCE.md) for full details of completed fixes and
 next optimization candidates.
 
 ### Done
+
 - GC pressure / BGM timer drift: removed per-frame `aliveEnemies` filter; iteration guards throughout
 - Survival enemy prune threshold lowered (24 → 10)
 - Scrap rendering batched (N×`ctx.save/restore` → one `beginPath/fill`)
@@ -98,6 +99,7 @@ next optimization candidates.
 - Wingman position init on upgrade grant
 
 ### Next candidates (priority order)
+
 1. **Object pooling** — bullets and scraps; structural GC elimination (no new deps)
 2. **Layered canvas** — separate bg/game layers; reduce clear+redraw cost (no new deps)
 3. **OffscreenCanvas + Worker** — move render off main thread (Safari 16.4+, requires refactor)
