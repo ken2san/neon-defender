@@ -140,14 +140,14 @@ bullets alive), this produced constant heap allocation and GC pauses.
 
 ### Boss sim gating — LASER phase-3 beam cap
 
-| Fix                                                                                           | Cause                                                                                                |
-| --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Fix                                                                                          | Cause                                                                                                       |
+| -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Cap sim collision to 2 beams at `isReducedSim` (tier ≥1): `(phase===3 && !isReducedSim)?4:2` | Phase-3 ran 4 collision checks (Math.sqrt + Math.atan2 each) while render only drew 2 — invisible beam hits |
 
 ### Boss sim gating — SWARM liveSubCount filter GC
 
-| Fix                                                                             | Cause                                                                                   |
-| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Fix                                                                                       | Cause                                                                  |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | Replace `enemies.current.filter(e => e.alive && !e.isBoss).length` with manual count loop | Creates ephemeral array every frame while SWARM boss is alive (wave 8) |
 
 ### iOS Home Screen shortcut serving stale JS
@@ -177,22 +177,7 @@ bullets alive), this produced constant heap allocation and GC pauses.
 ## Next Optimization Candidates
 
 Ordered by impact-to-effort ratio for iOS mobile.
-
-### 0. Boss simulation tier gating (targeted, no new deps)
-
-**Directly addresses "boss still heavy" on mobile.**
-
-Current state: boss phase logic, laser rotation, tractor beam drag, and tentacle physics
-run at full cost regardless of `simulationLoadTier`. Only particle/bullet caps are affected.
-
-Candidates for gating:
-
-- Tentacle segment physics: at sim tier ≥1, update every 2nd segment only (mirroring
-  the render stride already applied to collision detection)
-- Laser beam angle: at sim tier 2, quantise to 8 steps instead of continuous sin/cos
-- Tractor drag: at sim tier ≥1, skip drag update on frames where no player contact (cheap guard)
-
-Low refactor risk — all changes are inside the boss update block, isolated to mobile paths.
+**Note**: measure boss fight frame time on device before pursuing further fixes here.
 
 ### 1. Layered canvas (medium impact, no new deps)
 

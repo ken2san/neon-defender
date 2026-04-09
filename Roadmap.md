@@ -97,19 +97,31 @@ next optimization candidates.
 - Stage 2 entry: scraps + asteroids cleared at wave boundary
 - Stage 2-2 entry jolt: 5 causes isolated and fixed
 - Wingman position init on upgrade grant
+- Mobile shadow reduction: `shadowScale` tier 0 on mobile 0.7 → 0.5
+- Graze slow-motion permanent bug fixed
+- Mobile boss rendering: 3 render gaps closed (laser beam cap, tractor shadowBlur, nebula frame divisor)
+- Mobile formation floor: immediate tier ≥1 when ≥10 enemies alive
+- Mobile boss floor: immediate tier ≥1 on boss wave entry
+- **Object pooling**: bullets, enemyBullets, scraps — zero heap alloc per shot
+- Scrap render artifact (cyan polygon): `moveTo` restored before each `arc()`
+- iOS Home Screen shortcut stale JS: `Cache-Control: no-store` for `/index.html`
+- Boss sim gating: LASER phase-3 collision capped to 2 beams at tier ≥1; SWARM filter GC eliminated
 
-### Next candidates (priority order)
+### Remaining candidates (if boss fight still heavy after device measurement)
 
-1. **Object pooling** — bullets and scraps; structural GC elimination (no new deps)
-2. **Layered canvas** — separate bg/game layers; reduce clear+redraw cost (no new deps)
-3. **OffscreenCanvas + Worker** — move render off main thread (Safari 16.4+, requires refactor)
-4. **Pixi.js** — WebGL renderer (requires approval; worth it only if entity counts grow)
+1. **Layered canvas** — separate bg/game layers; reduce clear+redraw cost (no new deps)
+2. **OffscreenCanvas + Worker** — move render off main thread (Safari 16.4+, requires refactor)
+3. **Pixi.js** — WebGL renderer (requires approval; worth it only if entity counts grow)
 
 ---
 
 ## Current Status
 
-Active phase: **Phase 6 — Performance Polish**
+Active phase: **Phase 6 — Performance Polish** (near-complete)
 Branch: `perf/speed-polish-2`
 Build: passing (tsc, Vite)
 Firebase: live
+
+Significant performance improvement confirmed on device (Stages 1–4 + mid-bosses).
+Final boss (Wave 10, LASER phase 3) not yet verified on device — minor frame drop possible.
+Game is at a presentable/demo-ready state.
