@@ -1,6 +1,6 @@
 # NEON DEFENDER — Development Roadmap
 
-_Last updated: 2026-04-06_
+_Last updated: 2026-04-09_
 
 > Note: Core gameplay (player, enemies, bosses, upgrades, relics, audio, mobile) is already implemented.
 > This roadmap covers technical hardening, design review, and release.
@@ -82,9 +82,32 @@ Ship a stable, deployable build to Firebase Hosting.
 
 ---
 
+## Phase 6 — Performance Polish (Active)
+
+Branch: `perf/speed-polish-2`
+
+See [PERFORMANCE.md](PERFORMANCE.md) for full details of completed fixes and
+next optimization candidates.
+
+### Done
+- GC pressure / BGM timer drift: removed per-frame `aliveEnemies` filter; iteration guards throughout
+- Survival enemy prune threshold lowered (24 → 10)
+- Scrap rendering batched (N×`ctx.save/restore` → one `beginPath/fill`)
+- Stage 2 entry: scraps + asteroids cleared at wave boundary
+- Stage 2-2 entry jolt: 5 causes isolated and fixed
+- Wingman position init on upgrade grant
+
+### Next candidates (priority order)
+1. **Object pooling** — bullets and scraps; structural GC elimination (no new deps)
+2. **Layered canvas** — separate bg/game layers; reduce clear+redraw cost (no new deps)
+3. **OffscreenCanvas + Worker** — move render off main thread (Safari 16.4+, requires refactor)
+4. **Pixi.js** — WebGL renderer (requires approval; worth it only if entity counts grow)
+
+---
+
 ## Current Status
 
-Active phase: **Phase 5 — Release**
-Branch: `main`
+Active phase: **Phase 6 — Performance Polish**
+Branch: `perf/speed-polish-2`
 Build: passing (tsc, Vite)
 Firebase: live
