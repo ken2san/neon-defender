@@ -736,7 +736,7 @@ export default function App() {
     setStageProgress(0);
 
     stageStartTime.current = 0;
-    survivalTimerRef.current = 30;
+    survivalTimerRef.current = getSurvivalDurationFromStage(stage);
     setSurvivalTime(getSurvivalDurationFromStage(stage));
     blocks.current = [];
     scraps.current = [];
@@ -5233,14 +5233,11 @@ export default function App() {
       // Keep spawning enemies if visible threats are low.
       // Off-screen looping enemies should not block fresh spawns.
       const maxEnemies = isAsteroidBelt ? (isMobile ? 4 : 5) : currentStage === 3 ? 3 : currentStage === 4 ? 3 : 8;
-      const visibleEnemyCount = enemies.current.filter((e) =>
-        e.alive &&
-        !e.isBoss &&
-        e.x > -80 &&
-        e.x < CANVAS_WIDTH + 80 &&
-        e.y > -120 &&
-        e.y < CANVAS_HEIGHT + 120
-      ).length;
+      let visibleEnemyCount = 0;
+      for (let vi = 0; vi < enemies.current.length; vi++) {
+        const ve = enemies.current[vi];
+        if (ve.alive && !ve.isBoss && ve.x > -80 && ve.x < CANVAS_WIDTH + 80 && ve.y > -120 && ve.y < CANVAS_HEIGHT + 120) visibleEnemyCount++;
+      }
       if (visibleEnemyCount < maxEnemies && !isWarping.current) {
         const x = 40 + Math.random() * (CANVAS_WIDTH - 80);
         const eliteChance = isAsteroidBelt
@@ -5401,11 +5398,12 @@ export default function App() {
       audio.playWarp();
       flash.current = 0.6; // Warp start flash (reduced intensity)
 
-      // Clear bullets
+      // Clear bullets and loose entities
       bullets.current = [];
       enemyBullets.current = [];
       asteroids.current = [];
       obstacles.current = [];
+      scraps.current = [];
 
       setTimeout(() => {
         flash.current = 1.0; // Final warp flash
@@ -5422,8 +5420,7 @@ export default function App() {
     // Decay effects
     // (Moved to beginning of update loop)
 
-    const currentAliveEnemies = enemies.current.filter(e => e.alive);
-    if (currentAliveEnemies.some(e => e.y + e.height > CANVAS_HEIGHT && e.state === 'IN_FORMATION')) {
+    if (enemies.current.some(e => e.alive && e.y + e.height > CANVAS_HEIGHT && e.state === 'IN_FORMATION')) {
       setGameState('GAME_OVER');
     }
   };

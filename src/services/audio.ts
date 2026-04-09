@@ -2,6 +2,7 @@ class RetroAudio {
   ctx: AudioContext | null = null;
   bgmInterval: number | null = null;
   bgmStep: number = 0;
+  currentBGMStage: number = 0;
   pulse: number = 0;
   masterGain: GainNode | null = null;
   compressor: DynamicsCompressorNode | null = null;
@@ -626,6 +627,7 @@ class RetroAudio {
 
   playBGM(stage: number = 1) {
     if (!this.ctx || !this.masterGain) return;
+    if (this.bgmInterval !== null && this.currentBGMStage === stage) return;
     this.stopBGM();
 
     // Stage-specific musical themes
@@ -646,6 +648,7 @@ class RetroAudio {
     const currentScale = scales[(stage - 1) % scales.length];
     const speed = stage === 4 ? 110 : 125; // Faster for chase stage
 
+    this.currentBGMStage = stage;
     this.bgmInterval = window.setInterval(() => {
       if (!this.ctx || !this.masterGain || !this.bgmFilter) return;
 
@@ -827,6 +830,7 @@ class RetroAudio {
       this.bgmInterval = null;
     }
     this.bgmStep = 0;
+    this.currentBGMStage = 0;
   }
 }
 
