@@ -973,7 +973,7 @@ export default function App() {
       // Asteroid Belt: tentacles only — walls/destructibles would conflict with asteroid system.
       wallDensity = 0;
       destructibleDensity = 0;
-      tentacleChance = 0.06;
+      tentacleChance = 0.03;
     }
 
     if (currentStage === 3) {
