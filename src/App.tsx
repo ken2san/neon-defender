@@ -8378,23 +8378,28 @@ export default function App() {
             const survivalSec = s ? Math.floor(s.survivalMs / 1000) : 0;
             const survivalStr = s ? `${Math.floor(survivalSec / 60)}:${String(survivalSec % 60).padStart(2, '0')}` : '—';
 
-            // Condition diagnosis: read the stats like a biometric readout
+            // Condition diagnosis — hitsTaken is always 5 on GAME_OVER (100HP / 20dmg),
+            // so base diagnosis on accuracy, combo, grazes, sectors, and survival time.
             const diagnose = (): { label: string; color: string; detail: string } => {
               if (!s) return { label: 'UNKNOWN', color: '#888', detail: '' };
               const acc = accuracy ?? 0;
-              const dodged = s.hitsTaken <= 1;
-              const sharpEye = acc >= 70;
+              const sharpEye = acc >= 68;
               const hotStreak = s.maxCombo >= 8;
               const reflexes = s.grazes >= 5;
+              const deep = s.sectorsReached >= 6;
 
-              if (sharpEye && dodged && hotStreak)  return { label: 'PEAK STATE', color: '#00ffcc', detail: 'Aim sharp. Reflexes primed. You\'re in the zone.' };
-              if (sharpEye && hotStreak)            return { label: 'FOCUSED', color: '#00ff85', detail: 'High accuracy and good rhythm today.' };
-              if (dodged && reflexes)               return { label: 'EVASIVE', color: '#66aaff', detail: 'Grazed danger, stayed alive. Instincts working.' };
-              if (sharpEye && s.hitsTaken >= 3)     return { label: 'AGGRESSIVE', color: '#ff8800', detail: 'Shooting well but taking too many hits. Slow down.' };
-              if (!sharpEye && s.hitsTaken <= 1)    return { label: 'CAUTIOUS', color: '#9977ff', detail: 'Playing it safe. Trust your aim more.' };
-              if (acc < 35 && s.hitsTaken >= 3)     return { label: 'FATIGUED', color: '#ff3366', detail: 'Aim and evasion both off. Maybe take a break?' };
-              if (survivalSec < 30)                 return { label: 'WARMING UP', color: '#888888', detail: 'Short session. Shake the rust off.' };
-              return { label: 'AVERAGE', color: '#cccccc', detail: 'Solid play. Room to sharpen.' };
+              if (sharpEye && hotStreak && reflexes) return { label: 'PEAK STATE',   color: '#00ffcc', detail: 'Aim sharp. Combo locked. Reflexes alive. Pushed hard today.' };
+              if (sharpEye && hotStreak)             return { label: 'FOCUSED',       color: '#00ff85', detail: 'High accuracy and strong combo rhythm. Concentration is on.' };
+              if (hotStreak && deep)                 return { label: 'IN THE ZONE',   color: '#66ffaa', detail: 'Kept the chain alive deep into the run. Good mental stamina.' };
+              if (sharpEye && deep)                  return { label: 'MARKSMAN',      color: '#00ccff', detail: 'Accurate shooting held up far into the mission.' };
+              if (reflexes && deep)                  return { label: 'EDGE DANCER',   color: '#66aaff', detail: 'Living on the edge and surviving. Instincts are sharp.' };
+              if (sharpEye)                          return { label: 'SHARP EYES',    color: '#88ddff', detail: 'Good accuracy today. Work on sustaining combo chains.' };
+              if (hotStreak)                         return { label: 'COMBO HUNTER',  color: '#ffcc00', detail: 'Great combo instinct. Tighten up your aim to push further.' };
+              if (reflexes)                          return { label: 'EVASIVE',        color: '#9977ff', detail: 'Grazed danger often. Solid reflexes, inconsistent aim.' };
+              if (acc < 30 && s.maxCombo <= 2)       return { label: 'FATIGUED',      color: '#ff3366', detail: 'Low accuracy and no combo flow. Off day — take a break?' };
+              if (survivalSec < 30)                  return { label: 'WARMING UP',    color: '#888888', detail: 'Too short to read. Shake the rust off and go again.' };
+              if (s.sectorsReached >= 4)             return { label: 'GRINDING',      color: '#ccaa44', detail: 'Making it through. Keep building consistency.' };
+              return                                        { label: 'AVERAGE',        color: '#cccccc', detail: 'Steady play. Find one thing to sharpen each run.' };
             };
             const condition = diagnose();
 
@@ -8489,16 +8494,16 @@ export default function App() {
                     {
                       label: 'Aim Accuracy',
                       value: accuracy !== null ? `${accuracy}%` : '—',
-                      bar: accuracy !== null ? <StatBar value={accuracy} max={100} color={accuracy >= 70 ? '#00ffcc' : accuracy >= 45 ? '#ff8800' : '#ff3366'} /> : null,
-                      note: accuracy === null ? '' : accuracy >= 70 ? 'Sharp' : accuracy >= 45 ? 'Average' : 'Needs work',
-                      color: accuracy !== null && accuracy >= 70 ? '#00ffcc' : accuracy !== null && accuracy >= 45 ? '#ff8800' : '#ff3366',
+                      bar: accuracy !== null ? <StatBar value={accuracy} max={100} color={accuracy >= 68 ? '#00ffcc' : accuracy >= 45 ? '#ff8800' : '#ff3366'} /> : null,
+                      note: accuracy === null ? '' : accuracy >= 68 ? 'Sharp' : accuracy >= 45 ? 'Average' : 'Needs work',
+                      color: accuracy !== null && accuracy >= 68 ? '#00ffcc' : accuracy !== null && accuracy >= 45 ? '#ff8800' : '#ff3366',
                     },
                     {
-                      label: 'Hits Taken',
-                      value: s ? String(s.hitsTaken) : '—',
-                      bar: s ? <StatBar value={Math.max(0, 5 - s.hitsTaken)} max={5} color={s.hitsTaken <= 1 ? '#00ffcc' : s.hitsTaken <= 3 ? '#ff8800' : '#ff3366'} /> : null,
-                      note: !s ? '' : s.hitsTaken === 0 ? 'Perfect evasion' : s.hitsTaken <= 2 ? 'Good' : 'Took damage',
-                      color: !s ? '#888' : s.hitsTaken <= 1 ? '#00ffcc' : s.hitsTaken <= 3 ? '#ff8800' : '#ff3366',
+                      label: 'Shots Fired',
+                      value: s ? String(s.shotsFired) : '—',
+                      bar: s ? <StatBar value={Math.min(s.shotsFired, 300)} max={300} color='#88aaff' /> : null,
+                      note: !s ? '' : s.shotsFired >= 200 ? 'Trigger happy' : s.shotsFired >= 80 ? 'Active' : 'Conservative',
+                      color: '#88aaff',
                     },
                     {
                       label: 'Peak Combo',
