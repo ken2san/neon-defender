@@ -172,6 +172,7 @@ export default function App() {
 
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [upgradeOptions, setUpgradeOptions] = useState<UpgradeOption[]>([]);
+  const pendingLevelUpRef = useRef(0); // level-ups queued while boss wave clears
   const [assets, setAssets] = useState<Record<string, HTMLImageElement>>({});
   const [isTouchDevice, setIsTouchDevice] = useState(false);
   const TUTORIAL_SEEN_KEY = 'neon:tutorial-seen';
@@ -619,7 +620,13 @@ export default function App() {
     setXpToNextLevel(xpToNextLevelRef.current);
 
     if (progress.didLevelUp && !victoryPendingRef.current) {
-      triggerLevelUp();
+      // Suppress level-up if the boss wave just cleared — queue it for after the transition
+      const bossWaveCleared = waveHasBossRef.current && !enemies.current.some(e => e.alive && e.isBoss);
+      if (bossWaveCleared) {
+        pendingLevelUpRef.current += 1;
+      } else {
+        triggerLevelUp();
+      }
     }
 
     audio.playScrap();
@@ -627,6 +634,7 @@ export default function App() {
   };
 
   const triggerLevelUp = () => {
+    if (victoryPendingRef.current) return; // never show upgrade after final boss
     setUpgradeOptions(pickRandomOptions(LEVEL_UP_OPTIONS, 3));
     setShowUpgrade(true);
     setGameState('UPGRADE');
@@ -770,6 +778,12 @@ export default function App() {
 
     setGameState('PLAYING');
     setWave(waveRef.current);
+
+    // Deliver any level-up queued while the boss wave was clearing
+    if (pendingLevelUpRef.current > 0) {
+      pendingLevelUpRef.current = 0;
+      setTimeout(triggerLevelUp, 500);
+    }
 
     const stage = getStageFromWave(waveRef.current);
     setSectorName(getStageLabelFromWave(waveRef.current));
@@ -1146,6 +1160,7 @@ export default function App() {
     setIntegrity(100);
     waveRef.current = 1;
     victoryPendingRef.current = false;
+    pendingLevelUpRef.current = 0;
     setHasWingman(false);
     wingmanRef.current = false;
     isHackedRef.current = false;
@@ -4728,8 +4743,9 @@ export default function App() {
             });
           }
 
-          // Hit stop (milliseconds)
-          hitStopTimer.current = Date.now() + 33;
+          // Hit stop (milliseconds) — skip for bosses: rapid fire on boss = continuous
+          // hitstop stacking which freezes tractorBeamTimer and makes orbitals appear to stall
+          if (!enemy.isBoss) hitStopTimer.current = Date.now() + 33;
 
           // EMP Burst
           if (hasEMP && Math.random() < 0.1) {
@@ -6649,11 +6665,13 @@ export default function App() {
           ctx.stroke();
 
           // Rotating Rings — skip entirely at tier 2 (ellipse + rotate is expensive on mobile)
-          const angleOffset = (drawNow / 1000) * Math.PI;
+          // Use tractorBeamTimer (game-time) instead of wall clock: stays in sync with the
+          // laser beams and doesn't desync when hitstop or upgrade screen pauses the update loop.
+          const angleOffset = (enemy.tractorBeamTimer! / 1000) * Math.PI;
           const ringCount = isMinimalBossFx ? 0 : isReducedBossFx ? 1 : 2;
           for (let i = 0; i < ringCount; i++) {
             ctx.save();
-            ctx.rotate(angleOffset * (i + 1) * 0.25); // 0.25 = half the original 0.5 — slower, less dizzying
+            ctx.rotate(angleOffset * (i + 1) * 0.15); // 0.15 = ~12°/s ring1, ~25°/s ring2 — gentle orbit
             ctx.lineWidth = 2;
             ctx.beginPath();
             ctx.ellipse(0, 0, 60 + i * 20, 30 + i * 10, 0, 0, Math.PI * 2);
@@ -7651,7 +7669,7 @@ export default function App() {
 
         {/* Overlay Screens */}
         <AnimatePresence>
-          {showUpgrade && (
+          {showUpgrade && gameState !== 'VICTORY' && (
             <motion.div
               key="upgrade-overlay"
               initial={{ opacity: 0 }}
