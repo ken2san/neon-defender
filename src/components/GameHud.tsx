@@ -67,7 +67,7 @@ const GameHud = memo(function GameHud({
             <div className="w-1 h-3 bg-[#00ffcc] rounded-full animate-pulse" />
             <span className="text-[10px] font-black text-[#00ffcc] uppercase tracking-[0.4em]">{sectorName}</span>
           </div>
-          <div className="flex items-baseline gap-2">
+          <div className="relative flex items-baseline gap-2">
             <span className="text-2xl md:text-3xl font-black text-white tracking-tighter leading-none drop-shadow-[0_0_15px_rgba(255,255,255,0.4)]">
               {score.toLocaleString().padStart(8, '0')}
             </span>
@@ -79,7 +79,7 @@ const GameHud = memo(function GameHud({
                   initial={{ scale: 1.6, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="text-[10px] font-black uppercase tracking-widest"
+                  className="absolute left-0 -bottom-4 text-[9px] font-black uppercase tracking-widest whitespace-nowrap"
                   style={{ color: combo >= 5 ? '#ff3366' : '#ffcc00', textShadow: `0 0 8px ${combo >= 5 ? '#ff3366' : '#ffcc00'}` }}
                 >
                   {combo}× COMBO
