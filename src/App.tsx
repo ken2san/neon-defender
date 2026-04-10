@@ -4289,12 +4289,11 @@ export default function App() {
               audio.playEnemyShoot(enemy.x);
             }
           } else if (enemy.bossType === BossType.LASER) {
-            // Final Front laser boss: slower rotation and tighter hit width for fairer reads.
+            // Final Front laser boss: rotation is wall-clock-independent — intentionally
+            // NOT multiplied by timeScale so slingshot/graze/overdrive slow-mo never
+            // stutter the beam. dt alone keeps it frame-rate-independent.
             const laserRotationSpeed = enemy.phase === 3 ? 0.45 : enemy.phase === 2 ? 0.35 : 0.28;
-            // Final Front laser boss: dt-scaled timer is already frame-rate independent;
-            // rotation speed is not load-tier-gated so mobile and desktop feel the same.
-            const loadAdjustedRotationSpeed = laserRotationSpeed;
-            enemy.tractorBeamTimer += dt * (1000 / 60) * timeScale.current * loadAdjustedRotationSpeed;
+            enemy.tractorBeamTimer += dt * (1000 / 60) * laserRotationSpeed;
             const angle = (enemy.tractorBeamTimer / 1000) * Math.PI;
             // At reduced sim tier, cap to 2 beams — matches the render cap so player
             // is never hit by beams that are not drawn.
