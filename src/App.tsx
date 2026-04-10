@@ -271,6 +271,14 @@ export default function App() {
     grazes: number;
     sectorsReached: number;
   } | null>(null);
+  const [victoryStats, setVictoryStats] = useState<{
+    survivalMs: number;
+    shotsFired: number;
+    shotsHit: number;
+    hitsTaken: number;
+    maxCombo: number;
+    grazes: number;
+  } | null>(null);
   const trippyIntensity = useRef(0);
   const pulseRef = useRef(0);
   const [relics, setRelics] = useState<{id: string, label: string}[]>([]);
@@ -833,6 +841,14 @@ export default function App() {
     // Wave 10 is the final wave. If we somehow end up here past it, go to VICTORY.
     if (waveRef.current > 10) {
       victoryPendingRef.current = true;
+      setVictoryStats({
+        survivalMs: Date.now() - gameSessionStartRef.current,
+        shotsFired: shotsFiredRef.current,
+        shotsHit: shotsHitRef.current,
+        hitsTaken: hitsTakenRef.current,
+        maxCombo: maxComboRef.current,
+        grazes: grazeCount.current,
+      });
       setGameState('VICTORY');
       return;
     }
@@ -1270,6 +1286,7 @@ export default function App() {
     grazeCount.current = 0;
     gameSessionStartRef.current = Date.now();
     setGameOverStats(null);
+    setVictoryStats(null);
     audio.playStageStart();
     setGameState('PLAYING');
   };
@@ -1341,6 +1358,14 @@ export default function App() {
         setBossHealth(null);
         for (const b of bullets.current) b.alive = false;
         for (const b of enemyBullets.current) b.alive = false;
+        setVictoryStats({
+          survivalMs: Date.now() - gameSessionStartRef.current,
+          shotsFired: shotsFiredRef.current,
+          shotsHit: shotsHitRef.current,
+          hitsTaken: hitsTakenRef.current,
+          maxCombo: maxComboRef.current,
+          grazes: grazeCount.current,
+        });
         setGameState('VICTORY');
       }
 
@@ -4966,6 +4991,14 @@ export default function App() {
 
               if (enemy.isFinalBoss) {
                 victoryPendingRef.current = true;
+                setVictoryStats({
+                  survivalMs: Date.now() - gameSessionStartRef.current,
+                  shotsFired: shotsFiredRef.current,
+                  shotsHit: shotsHitRef.current,
+                  hitsTaken: hitsTakenRef.current,
+                  maxCombo: maxComboRef.current,
+                  grazes: grazeCount.current,
+                });
                 setGameState('VICTORY');
               }
 
@@ -8082,13 +8115,41 @@ export default function App() {
           {gameState === 'VICTORY' && (() => {
             const vRank = getVictoryRank(score);
             const isNewBest = score > 0 && score >= highScore;
+            const vs = victoryStats;
+            const vAccuracy = vs && vs.shotsFired > 0 ? Math.round((vs.shotsHit / vs.shotsFired) * 100) : null;
+            const vCompletionSec = vs ? Math.floor(vs.survivalMs / 1000) : 0;
+            const vCompletionStr = vs ? `${Math.floor(vCompletionSec / 60)}:${String(vCompletionSec % 60).padStart(2, '0')}` : '—';
+            const vAssess = (): { label: string; detail: string } => {
+              if (!vs) return { label: 'VETERAN', detail: 'Mission complete.' };
+              const acc = vAccuracy ?? 0;
+              if (vs.hitsTaken === 0 && acc >= 70 && vs.maxCombo >= 10) return { label: 'ACE PILOT', detail: 'Zero damage. Sharp aim. A textbook run.' };
+              if (vs.hitsTaken === 0 && acc >= 60) return { label: 'PERFECT RUN', detail: 'No damage taken. Clean and decisive.' };
+              if (acc >= 70 && vs.maxCombo >= 8) return { label: 'SHARPSHOOTER', detail: 'Outstanding accuracy and combo rhythm.' };
+              if (vs.hitsTaken === 0) return { label: 'GHOST', detail: 'Untouchable. The enemy never landed a hit.' };
+              if (acc >= 65) return { label: 'MARKSMAN', detail: 'High accuracy throughout the mission.' };
+              if (vs.grazes >= 10) return { label: 'EDGE DANCER', detail: 'Lived dangerously. Survived anyway.' };
+              if (vs.maxCombo >= 10) return { label: 'COMBO KING', detail: 'Relentless combo chains. Maximum pressure.' };
+              return { label: 'VETERAN', detail: 'Mission complete. Experience shows.' };
+            };
+            const vAssessment = vAssess();
+            const VStatBar = ({ value, max, color }: { value: number; max: number; color: string }) => (
+              <div className="w-full h-1 rounded-full mt-1" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${Math.min(100, Math.round((value / max) * 100))}%` }}
+                  transition={{ delay: 2.1, duration: 0.8, ease: 'easeOut' }}
+                  className="h-1 rounded-full"
+                  style={{ background: color, boxShadow: `0 0 6px ${color}` }}
+                />
+              </div>
+            );
             return (
             <motion.div
               key="victory-screen"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.8 }}
-              className="absolute inset-0 flex flex-col items-center justify-center z-50 text-center overflow-hidden"
+              className="absolute inset-0 flex flex-col items-center justify-center z-50 text-center overflow-y-auto py-6"
               style={{ background: 'radial-gradient(ellipse at 50% 30%, rgba(0,255,204,0.07) 0%, rgba(0,0,0,0.96) 70%)' }}
             >
               {/* Scanlines overlay */}
@@ -8208,7 +8269,7 @@ export default function App() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 1.6, duration: 0.5 }}
                   className="w-full mb-6 rounded-xl overflow-hidden"
-                  style={{ border: '1px solid rgba(0,255,204,0.2)', background: 'rgba(0,255,204,0.05)' }}
+                  style={{ border: '1px solid rgba(0,255,204,0.2)', background: 'rgba(0,255,204,0.04)' }}
                 >
                   {/* Score row */}
                   <div className="flex justify-between items-center px-5 pt-4 pb-2">
@@ -8236,6 +8297,55 @@ export default function App() {
                     <span className="text-[10px] tracking-[0.35em] uppercase text-[#00ffcc]/50">Sectors Cleared</span>
                     <span className="text-xl font-black text-white">{waveRef.current} / 10</span>
                   </div>
+
+                  {/* Pilot assessment */}
+                  <div className="mx-5 border-t border-[#00ffcc]/10" />
+                  <div className="px-5 py-3 text-left">
+                    <div className="text-[9px] tracking-[0.4em] uppercase text-[#00ffcc]/35 mb-1">Pilot Assessment</div>
+                    <div className="text-base font-black tracking-wider text-[#00ffcc]" style={{ textShadow: '0 0 15px rgba(0,255,204,0.5)' }}>
+                      {vAssessment.label}
+                    </div>
+                    <div className="text-[10px] text-white/30 mt-0.5 leading-relaxed">{vAssessment.detail}</div>
+                  </div>
+
+                  {/* Per-stat rows */}
+                  <div className="mx-5 border-t border-[#00ffcc]/10 mb-2" />
+                  {[
+                    {
+                      label: 'Aim Accuracy',
+                      value: vAccuracy !== null ? `${vAccuracy}%` : '—',
+                      bar: vAccuracy !== null ? <VStatBar value={vAccuracy} max={100} color={vAccuracy >= 70 ? '#00ffcc' : vAccuracy >= 45 ? '#ff8800' : '#ff3366'} /> : null,
+                    },
+                    {
+                      label: 'Hull Integrity',
+                      value: vs ? `${5 - vs.hitsTaken} / 5` : '—',
+                      bar: vs ? <VStatBar value={5 - vs.hitsTaken} max={5} color={vs.hitsTaken === 0 ? '#00ffcc' : vs.hitsTaken <= 2 ? '#ff8800' : '#ff3366'} /> : null,
+                    },
+                    {
+                      label: 'Clear Time',
+                      value: vCompletionStr,
+                      bar: null,
+                    },
+                    {
+                      label: 'Peak Combo',
+                      value: vs ? `×${vs.maxCombo}` : '—',
+                      bar: vs ? <VStatBar value={vs.maxCombo} max={15} color='#ffcc00' /> : null,
+                    },
+                    {
+                      label: 'Grazes',
+                      value: vs ? String(vs.grazes) : '—',
+                      bar: vs ? <VStatBar value={vs.grazes} max={20} color='#66aaff' /> : null,
+                    },
+                  ].map(({ label, value, bar }) => (
+                    <div key={label} className="px-5 pb-2">
+                      <div className="flex justify-between items-baseline">
+                        <span className="text-[10px] tracking-[0.25em] uppercase text-white/30">{label}</span>
+                        <span className="text-sm font-black font-mono text-white/60">{value}</span>
+                      </div>
+                      {bar}
+                    </div>
+                  ))}
+                  <div className="pb-1" />
                 </motion.div>
 
                 {/* CTA button */}
