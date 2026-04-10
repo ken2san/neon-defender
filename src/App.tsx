@@ -8149,7 +8149,7 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.8 }}
-              className="absolute inset-0 flex flex-col items-center justify-center z-50 text-center overflow-y-auto py-6"
+              className="absolute inset-0 flex flex-col items-center z-50 text-center overflow-y-auto"
               style={{ background: 'radial-gradient(ellipse at 50% 30%, rgba(0,255,204,0.07) 0%, rgba(0,0,0,0.96) 70%)' }}
             >
               {/* Scanlines overlay */}
@@ -8169,7 +8169,7 @@ export default function App() {
               />
 
               {/* Content */}
-              <div className="relative z-20 flex flex-col items-center w-full max-w-md px-6">
+              <div className="relative z-20 flex flex-col items-center w-full max-w-md px-6 py-8 my-auto">
 
                 {/* Game title */}
                 <motion.div
