@@ -6674,10 +6674,13 @@ export default function App() {
           const ringCount = isMinimalBossFx ? 0 : isReducedBossFx ? 1 : 2;
           for (let i = 0; i < ringCount; i++) {
             ctx.save();
-            ctx.rotate(angleOffset * (i + 1) * 0.15); // 0.15 = ~12°/s ring1, ~25°/s ring2 — gentle orbit
+            // 0.08 = slow drift; each ring has a different base phase so their "snap"
+            // intervals never align. Ellipses are 1.3:1 (was 2:1) — rounder shape makes
+            // the 2-fold visual symmetry much less jarring when the ring loops.
+            ctx.rotate(angleOffset * (i + 1) * 0.08 + i * Math.PI * 0.37);
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.ellipse(0, 0, 60 + i * 20, 30 + i * 10, 0, 0, Math.PI * 2);
+            ctx.ellipse(0, 0, 60 + i * 20, 46 + i * 15, 0, 0, Math.PI * 2);
             ctx.stroke();
             ctx.restore();
           }
