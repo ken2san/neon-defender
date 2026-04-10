@@ -4289,11 +4289,7 @@ export default function App() {
               audio.playEnemyShoot(enemy.x);
             }
           } else if (enemy.bossType === BossType.LASER) {
-            // Final Front laser boss: rotation is wall-clock-independent — intentionally
-            // NOT multiplied by timeScale so slingshot/graze/overdrive slow-mo never
-            // stutter the beam. dt alone keeps it frame-rate-independent.
-            const laserRotationSpeed = enemy.phase === 3 ? 0.45 : enemy.phase === 2 ? 0.35 : 0.28;
-            enemy.tractorBeamTimer += dt * (1000 / 60) * laserRotationSpeed;
+            // tractorBeamTimer is updated in loop() before hitstop — never freezes.
             const angle = (enemy.tractorBeamTimer / 1000) * Math.PI;
             // At reduced sim tier, cap to 2 beams — matches the render cap so player
             // is never hit by beams that are not drawn.
@@ -4961,7 +4957,7 @@ export default function App() {
           enemy.health! -= damage;
 
           if (isSlingshotAttacking) {
-            hitStopTimer.current = Date.now() + 60; // 60ms hit stop
+            if (!bossAlive) hitStopTimer.current = Date.now() + 60; // suppress during boss wave
             shake.current = Math.max(shake.current, 20);
             createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ffffff', 40);
             createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#00ffcc', 30);
@@ -7448,6 +7444,15 @@ export default function App() {
       if (isMobile && isIdleState && frameCounterRef.current % 2 !== 0) {
         requestRef.current = requestAnimationFrame(loop);
         return;
+      }
+
+      // Laser rotation runs on every rAF tick — completely independent of hitstop.
+      // hitstop blocks update() which is why the beam used to freeze mid-rotation.
+      for (const e of enemies.current) {
+        if (e.alive && e.bossType === BossType.LASER) {
+          const spd = e.phase === 3 ? 0.45 : e.phase === 2 ? 0.35 : 0.28;
+          e.tractorBeamTimer = (e.tractorBeamTimer || 0) + dtRef.current * (1000 / 60) * spd;
+        }
       }
 
       if (Date.now() < hitStopTimer.current) {
