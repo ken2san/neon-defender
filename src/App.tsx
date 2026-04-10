@@ -184,6 +184,7 @@ export default function App() {
   const [hasWingman, setHasWingman] = useState(false);
   const wingmanRef = useRef(false);
   const wingmanPos = useRef({ x: 0, y: 0 });
+  const wingmanLastShotTime = useRef(0);
 
   // Dev-only god mode
   const godModeRef = useRef(false);
@@ -2403,10 +2404,12 @@ export default function App() {
       wingmanPos.current.x += wdx * 0.1 * dt;
       wingmanPos.current.y += wdy * 0.1 * dt;
 
-      // Wingman firing
+      // Wingman firing — uses its own timer so it fires at 150ms regardless of player fire rate
       if (gameState === 'PLAYING') {
         const wingmanNow = Date.now();
-        if (wingmanNow - lastShotTime.current > (isOverdriveActiveRef.current ? 75 : 150)) {
+        const wingmanFireInterval = isOverdriveActiveRef.current ? 75 : 150;
+        if (wingmanNow - wingmanLastShotTime.current > wingmanFireInterval) {
+          wingmanLastShotTime.current = wingmanNow;
           spawnBullet(bullets.current, {
             x: wingmanPos.current.x + PLAYER_WIDTH / 2 - 2,
             y: wingmanPos.current.y,
@@ -6538,8 +6541,8 @@ export default function App() {
       ctx.restore();
     }
 
-      // Wingman Rendering
-      if (hasWingman) {
+      // Wingman Rendering — use ref not state to avoid stale-closure ghost after destruction
+      if (wingmanRef.current) {
         ctx.save();
         ctx.translate(wingmanPos.current.x + PLAYER_WIDTH / 2, wingmanPos.current.y + PLAYER_HEIGHT / 2);
       ctx.scale(0.8, 0.8); // Slightly smaller
