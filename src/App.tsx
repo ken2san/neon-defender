@@ -256,6 +256,21 @@ export default function App() {
   const lastHitTime = useRef(0);
   const stars = useRef<{x: number, y: number, size: number, speed: number, opacity: number}[]>([]);
   const [combo, setCombo] = useState(0);
+  // Session performance tracking (for GAME_OVER stats display)
+  const shotsFiredRef = useRef(0);
+  const shotsHitRef = useRef(0);
+  const hitsTakenRef = useRef(0);
+  const maxComboRef = useRef(0);
+  const gameSessionStartRef = useRef(0);
+  const [gameOverStats, setGameOverStats] = useState<{
+    survivalMs: number;
+    shotsFired: number;
+    shotsHit: number;
+    hitsTaken: number;
+    maxCombo: number;
+    grazes: number;
+    sectorsReached: number;
+  } | null>(null);
   const trippyIntensity = useRef(0);
   const pulseRef = useRef(0);
   const [relics, setRelics] = useState<{id: string, label: string}[]>([]);
@@ -600,6 +615,7 @@ export default function App() {
   const handlePlayerHit = () => {
     if (godModeRef.current) return;
     if (Date.now() < invulnerableUntil.current) return;
+    hitsTakenRef.current++;
 
     const damage = 20; // 5 hits to die
     const newIntegrity = Math.max(0, integrityRef.current - damage);
@@ -616,6 +632,15 @@ export default function App() {
     isHackedRef.current = false; // Clear hacked state on hit
 
     if (newIntegrity <= 0) {
+      setGameOverStats({
+        survivalMs: Date.now() - gameSessionStartRef.current,
+        shotsFired: shotsFiredRef.current,
+        shotsHit: shotsHitRef.current,
+        hitsTaken: hitsTakenRef.current,
+        maxCombo: maxComboRef.current,
+        grazes: grazeCount.current,
+        sectorsReached: waveRef.current,
+      });
       setGameState('GAME_OVER');
       setBossHealth(null);
       audio.playGameOver();
@@ -1237,6 +1262,14 @@ export default function App() {
       source: 'startGame',
       userAgent: navigator.userAgent,
     });
+    // Reset session stats
+    shotsFiredRef.current = 0;
+    shotsHitRef.current = 0;
+    hitsTakenRef.current = 0;
+    maxComboRef.current = 0;
+    grazeCount.current = 0;
+    gameSessionStartRef.current = Date.now();
+    setGameOverStats(null);
     audio.playStageStart();
     setGameState('PLAYING');
   };
@@ -2997,6 +3030,8 @@ export default function App() {
       }
       lastHitTime.current = frameNow;
       setCombo(comboRef.current);
+      shotsHitRef.current++;
+      if (comboRef.current > maxComboRef.current) maxComboRef.current = comboRef.current;
 
       const comboBonus = Math.floor(basePoints * (comboRef.current - 1) * 0.15);
       setScore((s) => s + basePoints + comboBonus);
@@ -4073,6 +4108,7 @@ export default function App() {
           });
         }
         audio.playShoot(playerPos.current.x + PLAYER_WIDTH / 2);
+        shotsFiredRef.current++;
         lastShotTime.current = now;
       }
     }
@@ -5003,6 +5039,8 @@ export default function App() {
           }
           lastHitTime.current = now;
           setCombo(comboRef.current);
+          shotsHitRef.current++;
+          if (comboRef.current > maxComboRef.current) maxComboRef.current = comboRef.current;
 
           const basePoints = enemy.isDiving ? 250 : 100;
           const comboBonus = Math.floor(basePoints * (comboRef.current - 1) * 0.1);
@@ -8236,24 +8274,186 @@ export default function App() {
             );
           })()}
 
-          {gameState === 'GAME_OVER' && (
+          {gameState === 'GAME_OVER' && (() => {
+            const s = gameOverStats;
+            const accuracy = s && s.shotsFired > 0 ? Math.round((s.shotsHit / s.shotsFired) * 100) : null;
+            const survivalSec = s ? Math.floor(s.survivalMs / 1000) : 0;
+            const survivalStr = s ? `${Math.floor(survivalSec / 60)}:${String(survivalSec % 60).padStart(2, '0')}` : '—';
+
+            // Condition diagnosis: read the stats like a biometric readout
+            const diagnose = (): { label: string; color: string; detail: string } => {
+              if (!s) return { label: 'UNKNOWN', color: '#888', detail: '' };
+              const acc = accuracy ?? 0;
+              const dodged = s.hitsTaken <= 1;
+              const sharpEye = acc >= 70;
+              const hotStreak = s.maxCombo >= 8;
+              const reflexes = s.grazes >= 5;
+
+              if (sharpEye && dodged && hotStreak)  return { label: 'PEAK STATE', color: '#00ffcc', detail: 'Aim sharp. Reflexes primed. You\'re in the zone.' };
+              if (sharpEye && hotStreak)            return { label: 'FOCUSED', color: '#00ff85', detail: 'High accuracy and good rhythm today.' };
+              if (dodged && reflexes)               return { label: 'EVASIVE', color: '#66aaff', detail: 'Grazed danger, stayed alive. Instincts working.' };
+              if (sharpEye && s.hitsTaken >= 3)     return { label: 'AGGRESSIVE', color: '#ff8800', detail: 'Shooting well but taking too many hits. Slow down.' };
+              if (!sharpEye && s.hitsTaken <= 1)    return { label: 'CAUTIOUS', color: '#9977ff', detail: 'Playing it safe. Trust your aim more.' };
+              if (acc < 35 && s.hitsTaken >= 3)     return { label: 'FATIGUED', color: '#ff3366', detail: 'Aim and evasion both off. Maybe take a break?' };
+              if (survivalSec < 30)                 return { label: 'WARMING UP', color: '#888888', detail: 'Short session. Shake the rust off.' };
+              return { label: 'AVERAGE', color: '#cccccc', detail: 'Solid play. Room to sharpen.' };
+            };
+            const condition = diagnose();
+
+            // Stat bar helper
+            const StatBar = ({ value, max, color }: { value: number; max: number; color: string }) => (
+              <div className="w-full h-1 rounded-full mt-1" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${Math.min(100, Math.round((value / max) * 100))}%` }}
+                  transition={{ delay: 1.2, duration: 0.8, ease: 'easeOut' }}
+                  className="h-1 rounded-full"
+                  style={{ background: color, boxShadow: `0 0 6px ${color}` }}
+                />
+              </div>
+            );
+
+            return (
             <motion.div
               key="game-over-screen"
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="absolute inset-0 bg-black/95 flex flex-col items-center justify-center p-8 text-center z-100"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.7 }}
+              className="absolute inset-0 flex flex-col items-center justify-center z-50 overflow-y-auto py-6"
+              style={{ background: 'radial-gradient(ellipse at 50% 20%, rgba(255,51,102,0.08) 0%, rgba(0,0,0,0.97) 65%)' }}
             >
-              <Trophy size={64} className="text-[#ffcc00] mb-6 drop-shadow-[0_0_20px_rgba(255,204,0,0.3)]" />
-              <h2 className="text-5xl font-black mb-2 text-[#ff3366] tracking-tighter">MISSION FAILED</h2>
-              <p className="text-gray-400 mb-10 uppercase tracking-[0.2em]">Final Score: <span className="text-white font-bold">{score}</span></p>
-              <button
-                onClick={startGame}
-                className="flex items-center gap-3 px-10 py-5 border-2 border-[#00ffcc] text-[#00ffcc] font-bold text-xl uppercase tracking-[0.2em] hover:bg-[#00ffcc] hover:text-black transition-all duration-300 shadow-[0_0_30px_rgba(0,255,204,0.2)]"
-              >
-                <RotateCcw size={24} /> Re-Engage
-              </button>
+              {/* Scanlines */}
+              <div className="absolute inset-0 pointer-events-none" aria-hidden style={{
+                background: 'repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.15) 3px, rgba(0,0,0,0.15) 4px)'
+              }} />
+
+              <div className="relative z-10 flex flex-col items-center w-full max-w-sm px-6 text-center">
+
+                {/* Header */}
+                <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+                  className="text-[10px] tracking-[0.5em] text-[#ff3366]/40 uppercase mb-4 font-bold">
+                  NEON DEFENDER
+                </motion.div>
+
+                {/* MISSION FAILED */}
+                <motion.div
+                  initial={{ opacity: 0, scale: 1.3 }}
+                  animate={{ opacity: 1, scale: 1, textShadow: ['0 0 20px #ff3366', '0 0 50px #ff3366', '0 0 20px #ff3366'] }}
+                  transition={{ delay: 0.2, duration: 2.5, repeat: Infinity, scale: { duration: 0.4 } }}
+                  className="text-4xl font-black text-[#ff3366] tracking-[0.15em] mb-1"
+                >
+                  MISSION FAILED
+                </motion.div>
+
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}
+                  className="text-xs text-white/25 tracking-[0.2em] uppercase mb-5">
+                  Hull integrity lost — sector abandoned
+                </motion.div>
+
+                {/* Condition panel */}
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 }}
+                  className="w-full rounded-xl p-4 mb-4 text-left"
+                  style={{ border: `1px solid ${condition.color}44`, background: `${condition.color}0d` }}
+                >
+                  <div className="text-[9px] tracking-[0.4em] uppercase mb-1" style={{ color: condition.color, opacity: 0.6 }}>
+                    TODAY'S CONDITION
+                  </div>
+                  <div className="text-xl font-black tracking-wider mb-1" style={{ color: condition.color, textShadow: `0 0 20px ${condition.color}88` }}>
+                    {condition.label}
+                  </div>
+                  <div className="text-[11px] text-white/40 leading-relaxed">
+                    {condition.detail}
+                  </div>
+                </motion.div>
+
+                {/* Stats grid */}
+                <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.9 }}
+                  className="w-full rounded-xl overflow-hidden mb-4"
+                  style={{ border: '1px solid rgba(255,51,102,0.15)', background: 'rgba(255,255,255,0.03)' }}
+                >
+                  {/* Score row */}
+                  <div className="flex justify-between items-center px-4 pt-4 pb-2">
+                    <span className="text-[10px] tracking-[0.3em] uppercase text-white/35">Score</span>
+                    <span className="text-2xl font-black font-mono text-white">{score.toLocaleString()}</span>
+                  </div>
+                  <div className="mx-4 border-t border-white/5 mb-3" />
+
+                  {/* Stat rows */}
+                  {[
+                    {
+                      label: 'Survival Time',
+                      value: survivalStr,
+                      bar: null,
+                      note: survivalSec >= 120 ? 'Long run' : survivalSec >= 60 ? 'Decent run' : 'Short session',
+                      color: '#9977ff',
+                    },
+                    {
+                      label: 'Aim Accuracy',
+                      value: accuracy !== null ? `${accuracy}%` : '—',
+                      bar: accuracy !== null ? <StatBar value={accuracy} max={100} color={accuracy >= 70 ? '#00ffcc' : accuracy >= 45 ? '#ff8800' : '#ff3366'} /> : null,
+                      note: accuracy === null ? '' : accuracy >= 70 ? 'Sharp' : accuracy >= 45 ? 'Average' : 'Needs work',
+                      color: accuracy !== null && accuracy >= 70 ? '#00ffcc' : accuracy !== null && accuracy >= 45 ? '#ff8800' : '#ff3366',
+                    },
+                    {
+                      label: 'Hits Taken',
+                      value: s ? String(s.hitsTaken) : '—',
+                      bar: s ? <StatBar value={Math.max(0, 5 - s.hitsTaken)} max={5} color={s.hitsTaken <= 1 ? '#00ffcc' : s.hitsTaken <= 3 ? '#ff8800' : '#ff3366'} /> : null,
+                      note: !s ? '' : s.hitsTaken === 0 ? 'Perfect evasion' : s.hitsTaken <= 2 ? 'Good' : 'Took damage',
+                      color: !s ? '#888' : s.hitsTaken <= 1 ? '#00ffcc' : s.hitsTaken <= 3 ? '#ff8800' : '#ff3366',
+                    },
+                    {
+                      label: 'Peak Combo',
+                      value: s ? `×${s.maxCombo}` : '—',
+                      bar: s ? <StatBar value={s.maxCombo} max={15} color='#ffcc00' /> : null,
+                      note: !s ? '' : s.maxCombo >= 10 ? 'On fire!' : s.maxCombo >= 5 ? 'Good rhythm' : 'Keep chaining',
+                      color: '#ffcc00',
+                    },
+                    {
+                      label: 'Grazes',
+                      value: s ? String(s.grazes) : '—',
+                      bar: s ? <StatBar value={s.grazes} max={20} color='#66aaff' /> : null,
+                      note: !s ? '' : s.grazes >= 10 ? 'Razor instincts' : s.grazes >= 4 ? 'Good dodging' : 'Play closer to the edge',
+                      color: '#66aaff',
+                    },
+                    {
+                      label: 'Sectors Reached',
+                      value: s ? `${s.sectorsReached} / 10` : '—',
+                      bar: s ? <StatBar value={s.sectorsReached} max={10} color='#9977ff' /> : null,
+                      note: !s ? '' : s.sectorsReached >= 8 ? 'Nearly there!' : s.sectorsReached >= 5 ? 'Halfway' : 'Push further',
+                      color: '#9977ff',
+                    },
+                  ].map(({ label, value, bar, note, color }) => (
+                    <div key={label} className="px-4 pb-3">
+                      <div className="flex justify-between items-baseline">
+                        <span className="text-[10px] tracking-[0.25em] uppercase text-white/35">{label}</span>
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-[9px] text-white/20">{note}</span>
+                          <span className="text-base font-black font-mono" style={{ color }}>{value}</span>
+                        </div>
+                      </div>
+                      {bar}
+                    </div>
+                  ))}
+                </motion.div>
+
+                {/* Re-engage button */}
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.5 }}>
+                  <button
+                    onClick={startGame}
+                    className="flex items-center gap-3 px-10 py-3 font-black text-base tracking-[0.25em] uppercase transition-all duration-300"
+                    style={{ border: '2px solid #00ffcc', color: '#00ffcc', background: 'transparent', boxShadow: '0 0 20px rgba(0,255,204,0.15)' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#00ffcc'; (e.currentTarget as HTMLButtonElement).style.color = '#000'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = '#00ffcc'; }}
+                  >
+                    <RotateCcw size={18} /> Re-Engage
+                  </button>
+                </motion.div>
+
+              </div>
             </motion.div>
-          )}
+            );
+          })()}
         </AnimatePresence>
 
         <AnimatePresence>
