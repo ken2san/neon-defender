@@ -262,7 +262,9 @@ export default function App() {
   const hitsTakenRef = useRef(0);
   const maxComboRef = useRef(0);
   const gameSessionStartRef = useRef(0);
-  const [gameOverStats, setGameOverStats] = useState<{
+  // useRef (not useState) so the game loop always writes to the live object.
+  // setGameState('GAME_OVER') triggers the re-render; at that point the ref is already populated.
+  const gameOverStatsRef = useRef<{
     survivalMs: number;
     shotsFired: number;
     shotsHit: number;
@@ -640,7 +642,7 @@ export default function App() {
     isHackedRef.current = false; // Clear hacked state on hit
 
     if (newIntegrity <= 0) {
-      setGameOverStats({
+      gameOverStatsRef.current = {
         survivalMs: Date.now() - gameSessionStartRef.current,
         shotsFired: shotsFiredRef.current,
         shotsHit: shotsHitRef.current,
@@ -648,7 +650,7 @@ export default function App() {
         maxCombo: maxComboRef.current,
         grazes: grazeCount.current,
         sectorsReached: waveRef.current,
-      });
+      };
       setGameState('GAME_OVER');
       setBossHealth(null);
       audio.playGameOver();
@@ -1285,7 +1287,7 @@ export default function App() {
     maxComboRef.current = 0;
     grazeCount.current = 0;
     gameSessionStartRef.current = Date.now();
-    setGameOverStats(null);
+    gameOverStatsRef.current = null;
     setVictoryStats(null);
     audio.playStageStart();
     setGameState('PLAYING');
@@ -8373,7 +8375,7 @@ export default function App() {
           })()}
 
           {gameState === 'GAME_OVER' && (() => {
-            const s = gameOverStats;
+            const s = gameOverStatsRef.current;
             const accuracy = s && s.shotsFired > 0 ? Math.round((s.shotsHit / s.shotsFired) * 100) : null;
             const survivalSec = s ? Math.floor(s.survivalMs / 1000) : 0;
             const survivalStr = s ? `${Math.floor(survivalSec / 60)}:${String(survivalSec % 60).padStart(2, '0')}` : '—';
