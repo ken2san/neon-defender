@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Zap } from 'lucide-react';
 import { SlingshotWallMode } from '../types';
@@ -19,7 +20,7 @@ type GameHudProps = {
   showWallMode: boolean;
 };
 
-export default function GameHud({
+const GameHud = memo(function GameHud({
   level,
   xp,
   xpToNextLevel,
@@ -176,4 +177,6 @@ export default function GameHud({
       </div>
     </div>
   );
-}
+});
+
+export default GameHud;

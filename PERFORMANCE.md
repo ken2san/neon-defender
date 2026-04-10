@@ -1,0 +1,226 @@
+# NEON DEFENDER — Performance Notes
+
+_Last updated: 2026-04-09 (session 5)_
+
+> **Usage**: Update "Current State" at the end of each session so the next session
+> can start here instead of reading conversation history.
+
+---
+
+## Current State
+
+**Branch**: `perf/speed-polish-2`
+**Last commit**: `40f97fa` — perf: boss sim gating — cap laser collision to 2 beams at tier>=1, fix SWARM filter GC
+**Build**: passing (TSC clean, Vite build OK)
+**Firebase**: deployed and live
+
+**Verified fixed** (tested on device):
+
+- Stage 2 entry slowdown ✅
+- Stage 2-2 entry jolt ✅
+- BGM gradual slowdown ✅
+- Graze slow-motion stuck at 0.8× permanently ✅
+- Wingman top-left spawn ✅
+- Tutorial Stage blur / motion accumulation: improved ✅
+- Boss fight heavy: partially improved (3 render gaps closed); still the heaviest point
+- Object pooling: zero heap alloc per bullet/scrap spawn ✅
+- Scrap rendering artifact (cyan polygon): fixed ✅
+- iOS Home Screen shortcut serving stale JS: fixed ✅
+
+**Overall**: significant performance improvement confirmed on device. Boss fight is slightly slow; all other stages acceptable.
+
+**Open issues / known bugs**:
+
+- Boss fight still slightly heavy on mobile (laser phase 3 full-canvas strokes remain the likely bottleneck)
+
+**Next task**: Measure boss fight frame time on device before adding more fixes
+
+---
+
+## Completed (branch: `perf/speed-polish-2`)
+
+### GC pressure / BGM timer drift (iOS `setInterval` delay)
+
+Root cause: `enemies.current.filter(e => e.alive)` ran unconditionally every frame
+(60 calls/sec on a 45s survival wave = 2,700 ephemeral arrays). On iOS, accumulated
+GC pauses delay `setInterval(125ms)`, causing BGM to gradually slow down mid-wave.
+
+| Fix                                                                                                      | Location                    |
+| -------------------------------------------------------------------------------------------------------- | --------------------------- |
+| Remove per-frame `aliveEnemies` pre-filter; iterate `enemies.current` directly with `!alive` guard       | Bullet-enemy collision loop |
+| `enemies.current.some()` instead of `filter().some()` for boss check                                     | Same section                |
+| Tesla arc chain: iterate `enemies.current` with guard instead of `aliveEnemies.filter(e => e !== enemy)` | Tesla hit handler           |
+| Overdrive chain: same pattern                                                                            | Overdrive explosion         |
+| Player-enemy sweep collision: iterate `enemies.current` with alive guard                                 | AABB sweep loop             |
+| `hardEnemies` filter: switch to `enemies.current.filter()` (no detached variable)                        | Auto-space logic            |
+| Survival enemy prune threshold: 24 → 10 (max 4–5 visible at once; dead ones piled up)                    | Enemy prune block           |
+| Scrap rendering: batch all dots into one `beginPath/fill` (was N×`ctx.save/restore`)                     | Scrap draw loop             |
+
+### Stage 2 entry slowdown
+
+| Fix                                                                           | Cause                                              |
+| ----------------------------------------------------------------------------- | -------------------------------------------------- |
+| `scraps.current = []` and `asteroids.current = []` added to `startNextWave()` | Entities from previous waves kept updating/drawing |
+| Cap fragment spawning to `maxAsteroids` (splits were bypassing the cap)       | Mobile asteroid count exceeded 8/12 limit          |
+
+### Stage 2-2 entry jolt (wave boundary)
+
+| Fix                                                                                  | Cause                                        |
+| ------------------------------------------------------------------------------------ | -------------------------------------------- |
+| Survival spawn check: manual count loop instead of `filter().length` per frame       | 60 alloc/sec in spawn throttle               |
+| Game-over check: `enemies.current.some()` instead of `filter(e => e.alive)`          | Unnecessary array creation                   |
+| Scraps cleared in wave-clear handler (pre-warp), not only in `startNextWave`         | Scraps piled during 1400ms warp animation    |
+| `survivalTimerRef` fixed to use `getSurvivalDurationFromStage()` (was hard-coded 30) | Spurious timer call at wave 4 entry          |
+| BGM: skip `playBGM()` restart when stage hasn't changed                              | AGM AudioContext work at every wave boundary |
+
+### Wingman position init
+
+| Fix                                                          | Cause                                                 |
+| ------------------------------------------------------------ | ----------------------------------------------------- |
+| `wingmanPos.current` set to player position on upgrade grant | Default `{x:0,y:0}` caused top-left spawn + slow lerp |
+
+### Mobile shadow reduction (tier 0 unification)
+
+Root cause: at render tier 0, `shadowScale = 0.7` on mobile → 18 enemies × `shadowBlur 10.5px`
+cost more than a boss at tier 1 (`shadowBlur 7.5px`). Tutorial stage was heavier than
+Chase-1 despite having no survival mechanics.
+
+| Fix                                                        | Effect                                                                                     |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `shadowScale` tier 0 on mobile: 0.7 → 0.5 (same as tier 1) | `shadowBlur 10.5` → `7.5` per enemy at tier 0; ~28% GPU shadow reduction on Tutorial stage |
+
+### Graze slow-motion permanent bug
+
+| Fix                                                                   | Cause                                                                                          |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `handleGraze()`: add `setTimeout(150ms)` to restore `timeScale = 1.0` | `timeScale` set to 0.8 on graze with no reset; every other hit-stop had a reset; graze did not |
+
+### Mobile boss rendering — 3 render gaps
+
+Root cause: three rendering paths did not correctly apply mobile tier reductions during boss fights.
+
+| Fix                                                                           | Gap                                                                                                  |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| LASER phase-3 beam count: `isReducedBossFx` (tier 1) now also caps at 2 beams | Was only capped at tier 2; mobile always at tier ≥1 during boss → 4 full-screen strokes redundantly  |
+| Tractor beam `shadowBlur`: `20` → `20 * shadowScale`                          | Hardcoded value ignored `shadowScale`; shadow fired at full cost even at tier 2 (shadowScale=0)      |
+| Nebula frame divisor: mobile + boss + tier 1 → 3 (skip 2-of-3 frames)         | Was 2 (skip 1-of-2); `createRadialGradient + screen composite` is expensive during heaviest scenario |
+
+### Mobile formation floor (tier ≥1 when ≥10 enemies alive)
+
+| Fix                                                                        | Cause                                                              |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Pre-raise render and simulation tier to 1 on mobile when ≥10 enemies alive | 18 formation enemies at tier 0 cost more GPU than a boss at tier 1 |
+
+### Mobile boss render/simulation floor (immediate tier ≥1)
+
+| Fix                                                                                    | Cause                                                                                  |
+| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Clamp `nextTier` and `nextSimulationTier` to ≥1 on mobile when `waveHasBossRef` is set | p95 moving average took 2–3s to cross threshold; boss caused visible slowdown on entry |
+
+### Object pooling for bullets, enemyBullets, scraps
+
+Root cause: every player shot and enemy shot created a new JS object via `push({...})`;
+destroyed entities were removed via `splice()` or `.filter()`. On heavy waves (100+ enemy
+bullets alive), this produced constant heap allocation and GC pauses.
+
+| Fix                                                                              | Effect                                                           |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Pre-allocate fixed pools via `Array.from` in `useRef` (100/150/100 slots mobile) | Zero heap alloc at steady state                                  |
+| `spawnBullet(pool, data)` / `spawnScrap(pool, data)` module-level helpers        | Reclaim first dead slot via linear scan; `Object.assign` into it |
+| All `push()` → `spawnBullet()`/`spawnScrap()` (17 call sites)                    | No new object creation per shot                                  |
+| All `splice()`/`filter()` destruction → `b.alive = false` (20+ sites)            | No array mutation; dead slots reused next spawn                  |
+| All update/collision/render loops: `if (!b.alive) continue/return`               | Dead slots skipped at zero allocation cost                       |
+| `enemyBulletCap` splice-truncation removed                                       | No longer needed — pool size is the hard cap                     |
+
+### Scrap render artifact (cyan polygon)
+
+| Fix                                                                              | Cause                                                                                                                   |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Restore `ctx.moveTo(s.x + 2, s.y)` before each `ctx.arc()` in scrap batch render | Missing `moveTo` caused Canvas 2D to implicitly draw `lineTo` between arcs, connecting all dots into one filled polygon |
+
+### Boss sim gating — LASER phase-3 beam cap
+
+| Fix                                                                                          | Cause                                                                                                       |
+| -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Cap sim collision to 2 beams at `isReducedSim` (tier ≥1): `(phase===3 && !isReducedSim)?4:2` | Phase-3 ran 4 collision checks (Math.sqrt + Math.atan2 each) while render only drew 2 — invisible beam hits |
+
+### Boss sim gating — SWARM liveSubCount filter GC
+
+| Fix                                                                                       | Cause                                                                  |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Replace `enemies.current.filter(e => e.alive && !e.isBoss).length` with manual count loop | Creates ephemeral array every frame while SWARM boss is alive (wave 8) |
+
+### iOS Home Screen shortcut serving stale JS
+
+| Fix                                                                | Cause                                                                                              |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| Add `Cache-Control: no-store` for `/index.html` in `firebase.json` | iOS caches PWA/shortcut `index.html` indefinitely; Vite hash-busts JS but not the HTML entry point |
+
+### Scrap magnet sqrt elimination
+
+| Fix                                                                                                          | Location          |
+| ------------------------------------------------------------------------------------------------------------ | ----------------- |
+| Range check: `Math.sqrt` → squared-distance comparison; `Math.sqrt` only for in-range scraps (normalisation) | Scrap magnet loop |
+| Collection check: `dist < 30` → `distSq < 900`                                                               | Same              |
+
+### Other (Phase 4, earlier)
+
+- Frame-rate independence: dt-scaled movement
+- Adaptive render tier: shadowBlur, collision stride, particle caps by device
+- Mobile 60fps cap (ProMotion guard), idle 30fps throttle
+- Relic cache: per-frame lookup eliminated
+- Math.pow → exponentiation operator (`**`) where compiled away
+- Audio node reuse; oscillator pool
+
+---
+
+## Next Optimization Candidates
+
+Ordered by impact-to-effort ratio for iOS mobile.
+**Note**: measure boss fight frame time on device before pursuing further fixes here.
+
+### 1. Layered canvas (medium impact, no new deps)
+
+Background (stars, asteroids) moves slowly and doesn't change every frame.
+Split into two `<canvas>` elements:
+
+- **bg layer**: redraws only when dirty (parallax scroll tick, asteroid move)
+- **game layer**: clears and redraws every frame
+
+Saves ~30–40% of `clearRect` + star/asteroid draw calls per frame on busy frames.
+
+### 2. OffscreenCanvas + Worker (high impact, requires refactor)
+
+Move the entire render pipeline to a Web Worker via `canvas.transferControlToOffscreen()`.
+Main thread handles only input and state; worker handles draw.
+Structurally eliminates all rendering from the main thread — BGM timers, touch events,
+and `setInterval` are no longer competing with draw calls.
+
+**Safari support**: OffscreenCanvas is supported since Safari 16.4 / iOS 16.4 (2023).
+**Cost**: significant refactor — all canvas API calls must move to worker; state must
+be serialized/transferred across the boundary. Not worth it until pooling + layered
+canvas are done and profiling still shows a bottleneck.
+
+### 3. Pixi.js / WebGL renderer (high impact, high effort, new dep)
+
+Replace Canvas 2D with WebGL via Pixi.js. Sprite batching and GPU-side compositing
+handle hundreds of objects with negligible CPU cost.
+
+**When to consider**: when enemy/particle count is intentionally increased (Phase 3+
+content), or when Canvas 2D is confirmed as the bottleneck via profiler. Current
+game scale (≤50 enemies, ≤200 bullets) does not saturate Canvas 2D on modern
+devices — GC and main-thread pressure are the real bottleneck today.
+
+**Requires user approval** before adding as a dependency.
+
+---
+
+## Profiling Tips (iOS Safari)
+
+1. Safari → Develop → [device] → Connect
+2. Timelines tab → JavaScript & Events + Rendering & Layout
+3. Record a full survival wave (45s)
+4. Look for: GC events in JS timeline, long frames in rendering, `setInterval` drift
+
+Key metric: if `setInterval` callbacks for BGM fire at 130ms+ instead of 125ms
+mid-wave, GC pressure is still present.

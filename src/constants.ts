@@ -14,6 +14,8 @@ export const ENEMY_ROWS = 5;
 export const ENEMY_COLS = 8;
 export const ENEMY_SPACING = 55;
 export const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || ('ontouchstart' in window);
+export const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+export const isIOSStandalone = isIOS && (window.navigator as any).standalone === true;
 
 // --- Performance Constants ---
 export const MAX_PARTICLES = isMobile ? 150 : 500;

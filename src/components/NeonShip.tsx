@@ -1,4 +1,6 @@
-const NeonShip = ({ className = "", tension = 0 }: { className?: string, tension?: number }) => (
+import { memo } from 'react';
+
+const NeonShip = memo(({ className = "", tension = 0 }: { className?: string, tension?: number }) => (
   <svg viewBox="0 0 100 100" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <filter id="glow">
@@ -25,6 +27,6 @@ const NeonShip = ({ className = "", tension = 0 }: { className?: string, tension
       <animate attributeName="opacity" values="0.4;0.8;0.4" dur="0.2s" repeatCount="indefinite" />
     </circle>
   </svg>
-);
+));
 
 export default NeonShip;

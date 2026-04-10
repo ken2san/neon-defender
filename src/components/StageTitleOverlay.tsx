@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { motion } from 'motion/react';
 
 type StageTitleOverlayProps = {
@@ -14,7 +15,7 @@ const getTitleText = (wave: number) => {
   return `STAGE ${stage}-${sector}`;
 };
 
-export default function StageTitleOverlay({ wave, sectorName }: StageTitleOverlayProps) {
+const StageTitleOverlay = memo(function StageTitleOverlay({ wave, sectorName }: StageTitleOverlayProps) {
   const titleText = getTitleText(wave);
 
   return (
@@ -78,4 +79,6 @@ export default function StageTitleOverlay({ wave, sectorName }: StageTitleOverla
       </div>
     </motion.div>
   );
-}
+});
+
+export default StageTitleOverlay;

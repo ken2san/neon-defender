@@ -2,9 +2,21 @@ class RetroAudio {
   ctx: AudioContext | null = null;
   bgmInterval: number | null = null;
   bgmStep: number = 0;
+  currentBGMStage: number = 0;
   pulse: number = 0;
   masterGain: GainNode | null = null;
   compressor: DynamicsCompressorNode | null = null;
+  // BGM effects chain — created ONCE in init(), reused every step to prevent node accumulation.
+  bgmFilter: BiquadFilterNode | null = null;
+  bgmDelay: DelayNode | null = null;
+  bgmDelayGain: GainNode | null = null;
+  bgmDelayFeedback: GainNode | null = null;
+  // Pre-baked noise buffers — generated once at init(), reused per-play to avoid per-call allocations.
+  enemyHitBuffer: AudioBuffer | null = null;
+  explosionBuffer: AudioBuffer | null = null;
+  hatBuffer: AudioBuffer | null = null;
+  warpBuffer: AudioBuffer | null = null;
+  playerHitBuffer: AudioBuffer | null = null;
 
   init() {
     if (!this.ctx) {
@@ -23,6 +35,51 @@ class RetroAudio {
 
       this.masterGain.connect(this.compressor);
       this.compressor.connect(this.ctx.destination);
+
+      // BGM effects chain — created once here, reused every BGM step.
+      this.bgmFilter = this.ctx.createBiquadFilter();
+      this.bgmFilter.type = 'lowpass';
+      this.bgmFilter.Q.value = 2;
+      this.bgmFilter.connect(this.masterGain);
+
+      this.bgmDelay = this.ctx.createDelay(1.0);
+      this.bgmDelay.delayTime.value = 0.375;
+      this.bgmDelayGain = this.ctx.createGain();
+      this.bgmDelayGain.gain.value = 0.3;
+      this.bgmDelayFeedback = this.ctx.createGain();
+      this.bgmDelayFeedback.gain.value = 0.4;
+      this.bgmFilter.connect(this.bgmDelay);
+      this.bgmDelay.connect(this.bgmDelayFeedback);
+      this.bgmDelayFeedback.connect(this.bgmDelay);
+      this.bgmDelay.connect(this.bgmDelayGain);
+      this.bgmDelayGain.connect(this.masterGain);
+
+      // Pre-bake noise buffers (reused per-play; avoids per-call random generation).
+      const hitSize = Math.floor(this.ctx.sampleRate * 0.15);
+      this.enemyHitBuffer = this.ctx.createBuffer(1, hitSize, this.ctx.sampleRate);
+      const hitData = this.enemyHitBuffer.getChannelData(0);
+      for (let i = 0; i < hitSize; i++) hitData[i] = Math.random() * 2 - 1;
+
+      const explSize = this.ctx.sampleRate; // 1 second
+      this.explosionBuffer = this.ctx.createBuffer(1, explSize, this.ctx.sampleRate);
+      const explData = this.explosionBuffer.getChannelData(0);
+      for (let i = 0; i < explSize; i++) explData[i] = Math.random() * 2 - 1;
+
+      const hatSize = Math.floor(this.ctx.sampleRate * 0.05);
+      this.hatBuffer = this.ctx.createBuffer(1, hatSize, this.ctx.sampleRate);
+      const hatData = this.hatBuffer.getChannelData(0);
+      for (let i = 0; i < hatSize; i++) hatData[i] = Math.random() * 2 - 1;
+
+      const warpSize = Math.floor(this.ctx.sampleRate * 1.6);
+      this.warpBuffer = this.ctx.createBuffer(1, warpSize, this.ctx.sampleRate);
+      const warpData = this.warpBuffer.getChannelData(0);
+      for (let i = 0; i < warpSize; i++) warpData[i] = Math.random() * 2 - 1;
+
+      const playerHitSize = Math.floor(this.ctx.sampleRate * 0.6);
+      this.playerHitBuffer = this.ctx.createBuffer(1, playerHitSize, this.ctx.sampleRate);
+      const playerHitData = this.playerHitBuffer.getChannelData(0);
+      for (let i = 0; i < playerHitSize; i++) playerHitData[i] = Math.random() * 2 - 1;
+
     }
     if (this.ctx.state === 'suspended') {
       this.ctx.resume();
@@ -31,11 +88,9 @@ class RetroAudio {
 
   private createPanner(x: number = 300) {
     if (!this.ctx) return null;
-    const panner = this.ctx.createPanner();
-    panner.panningModel = 'equalpower';
-    // Map screen X (0-600) to panner X (-1 to 1)
-    const panX = (x / 300) - 1;
-    panner.positionX.setValueAtTime(panX, this.ctx.currentTime);
+    // StereoPannerNode is significantly cheaper on mobile than the full 3D PannerNode.
+    const panner = this.ctx.createStereoPanner();
+    panner.pan.value = (x / 300) - 1; // -1 (left) to 1 (right)
     return panner;
   }
 
@@ -62,6 +117,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 0.1);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); panner?.disconnect(); };
   }
 
   playEnemyShoot(x: number = 300) {
@@ -87,6 +143,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 0.2);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); panner?.disconnect(); };
   }
 
   playDive(x: number = 300) {
@@ -112,19 +169,14 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 1.5);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); panner?.disconnect(); };
   }
 
   playEnemyHit(x: number = 300) {
-    if (!this.ctx || !this.masterGain) return;
+    if (!this.ctx || !this.masterGain || !this.enemyHitBuffer) return;
     const duration = 0.15;
-    const bufferSize = this.ctx.sampleRate * duration;
-    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = Math.random() * 2 - 1;
-    }
     const noise = this.ctx.createBufferSource();
-    noise.buffer = buffer;
+    noise.buffer = this.enemyHitBuffer; // reuse pre-baked buffer
 
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'highpass';
@@ -146,19 +198,15 @@ class RetroAudio {
     }
 
     noise.start();
+    noise.stop(this.ctx.currentTime + duration);
+    noise.onended = () => { noise.disconnect(); filter.disconnect(); gain.disconnect(); panner?.disconnect(); };
   }
 
   playPlayerHit() {
-    if (!this.ctx || !this.masterGain) return;
+    if (!this.ctx || !this.masterGain || !this.playerHitBuffer) return;
     const duration = 0.6;
-    const bufferSize = this.ctx.sampleRate * duration;
-    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = Math.random() * 2 - 1;
-    }
     const noise = this.ctx.createBufferSource();
-    noise.buffer = buffer;
+    noise.buffer = this.playerHitBuffer;
 
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
@@ -174,6 +222,8 @@ class RetroAudio {
     gain.connect(this.masterGain);
 
     noise.start();
+    noise.stop(this.ctx.currentTime + duration);
+    noise.onended = () => { noise.disconnect(); filter.disconnect(); gain.disconnect(); };
 
     // Add a low thud
     const osc = this.ctx.createOscillator();
@@ -187,6 +237,7 @@ class RetroAudio {
     oscGain.connect(this.masterGain);
     osc.start();
     osc.stop(this.ctx.currentTime + 0.3);
+    osc.onended = () => { osc.disconnect(); oscGain.disconnect(); };
   }
 
   playPowerUp() {
@@ -207,6 +258,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 0.3);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playOverdrive() {
@@ -226,6 +278,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 0.5);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playSlingshot() {
@@ -246,6 +299,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 0.15);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playPowerDown() {
@@ -265,6 +319,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 0.5);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playShieldHit() {
@@ -284,6 +339,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 0.1);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playWarp() {
@@ -321,34 +377,34 @@ class RetroAudio {
     gain2.connect(this.masterGain);
 
     // Noise burst for "rushing" feel
-    const bufferSize = this.ctx.sampleRate * duration;
-    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = Math.random() * 2 - 1;
+    if (this.warpBuffer) {
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = this.warpBuffer;
+      const noiseGain = this.ctx.createGain();
+      const noiseFilter = this.ctx.createBiquadFilter();
+      noiseFilter.type = 'bandpass';
+      noiseFilter.frequency.setValueAtTime(100, this.ctx.currentTime);
+      noiseFilter.frequency.exponentialRampToValueAtTime(5000, this.ctx.currentTime + duration);
+
+      noiseGain.gain.setValueAtTime(0, this.ctx.currentTime);
+      noiseGain.gain.linearRampToValueAtTime(0.15, this.ctx.currentTime + 0.2);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+
+      noise.connect(noiseFilter);
+      noiseFilter.connect(noiseGain);
+      noiseGain.connect(this.masterGain);
+      noise.start();
+      noise.stop(this.ctx.currentTime + duration);
+      noise.onended = () => { noise.disconnect(); noiseFilter.disconnect(); noiseGain.disconnect(); };
     }
-    const noise = this.ctx.createBufferSource();
-    noise.buffer = buffer;
-    const noiseGain = this.ctx.createGain();
-    const noiseFilter = this.ctx.createBiquadFilter();
-    noiseFilter.type = 'bandpass';
-    noiseFilter.frequency.setValueAtTime(100, this.ctx.currentTime);
-    noiseFilter.frequency.exponentialRampToValueAtTime(5000, this.ctx.currentTime + duration);
-
-    noiseGain.gain.setValueAtTime(0, this.ctx.currentTime);
-    noiseGain.gain.linearRampToValueAtTime(0.15, this.ctx.currentTime + 0.2);
-    noiseGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
-
-    noise.connect(noiseFilter);
-    noiseFilter.connect(noiseGain);
-    noiseGain.connect(this.masterGain);
 
     osc1.start();
     osc2.start();
-    noise.start();
 
     osc1.stop(this.ctx.currentTime + duration);
     osc2.stop(this.ctx.currentTime + duration);
+    osc1.onended = () => { osc1.disconnect(); gain1.disconnect(); };
+    osc2.onended = () => { osc2.disconnect(); filter.disconnect(); gain2.disconnect(); };
   }
 
   playWaveClear() {
@@ -366,6 +422,7 @@ class RetroAudio {
       gain.connect(this.masterGain!);
       osc.start(this.ctx!.currentTime + i * 0.1);
       osc.stop(this.ctx!.currentTime + i * 0.1 + 0.3);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
     });
   }
 
@@ -386,19 +443,14 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 1.5);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playExplosion(x: number = 300) {
-    if (!this.ctx || !this.masterGain) return;
+    if (!this.ctx || !this.masterGain || !this.explosionBuffer) return;
     const duration = 1.0;
-    const bufferSize = this.ctx.sampleRate * duration;
-    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = Math.random() * 2 - 1;
-    }
     const noise = this.ctx.createBufferSource();
-    noise.buffer = buffer;
+    noise.buffer = this.explosionBuffer; // reuse pre-baked buffer
 
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
@@ -421,6 +473,8 @@ class RetroAudio {
     }
 
     noise.start();
+    noise.stop(this.ctx.currentTime + duration);
+    noise.onended = () => { noise.disconnect(); filter.disconnect(); gain.disconnect(); panner?.disconnect(); };
 
     // Low boom
     const boom = this.ctx.createOscillator();
@@ -434,6 +488,7 @@ class RetroAudio {
     boomGain.connect(this.masterGain);
     boom.start();
     boom.stop(this.ctx.currentTime + 0.5);
+    boom.onended = () => { boom.disconnect(); boomGain.disconnect(); };
   }
 
   playComboBreak() {
@@ -453,6 +508,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 0.4);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playGraze() {
@@ -468,6 +524,7 @@ class RetroAudio {
     gain.connect(this.masterGain);
     osc.start();
     osc.stop(this.ctx.currentTime + 0.05);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playBossWarning() {
@@ -491,6 +548,7 @@ class RetroAudio {
     gain.connect(this.masterGain);
     osc.start();
     osc.stop(this.ctx.currentTime + duration);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playStageStart() {
@@ -508,6 +566,7 @@ class RetroAudio {
       gain.connect(this.masterGain!);
       osc.start(this.ctx!.currentTime + i * 0.1);
       osc.stop(this.ctx!.currentTime + i * 0.1 + 0.2);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
     });
   }
 
@@ -535,6 +594,7 @@ class RetroAudio {
     osc.start();
     lfo.stop(this.ctx.currentTime + 1.0);
     osc.stop(this.ctx.currentTime + 1.0);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); lfo.disconnect(); lfoGain.disconnect(); };
   }
 
   playTractorBeam() {
@@ -562,10 +622,12 @@ class RetroAudio {
     osc.start();
     lfo.stop(this.ctx.currentTime + 0.5);
     osc.stop(this.ctx.currentTime + 0.5);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); lfo.disconnect(); lfoGain.disconnect(); };
   }
 
   playBGM(stage: number = 1) {
     if (!this.ctx || !this.masterGain) return;
+    if (this.bgmInterval !== null && this.currentBGMStage === stage) return;
     this.stopBGM();
 
     // Stage-specific musical themes
@@ -586,32 +648,18 @@ class RetroAudio {
     const currentScale = scales[(stage - 1) % scales.length];
     const speed = stage === 4 ? 110 : 125; // Faster for chase stage
 
+    this.currentBGMStage = stage;
     this.bgmInterval = window.setInterval(() => {
-      if (!this.ctx || !this.masterGain) return;
+      if (!this.ctx || !this.masterGain || !this.bgmFilter) return;
 
       const step = this.bgmStep % 16;
 
-      // Global filter sweep for more "musical" techno
+      // Reuse the persistent effects chain created in init().
+      // Update the filter sweep frequency in place (no new nodes created).
       const sweepFreq = 1000 + Math.sin(this.bgmStep * 0.05) * 800;
-      const globalFilter = this.ctx.createBiquadFilter();
-      globalFilter.type = 'lowpass';
+      const globalFilter = this.bgmFilter;
       globalFilter.frequency.value = sweepFreq;
-      globalFilter.Q.value = 2; // Increased resonance for "trippy" feel
-      globalFilter.connect(this.masterGain);
 
-      // Delay effect for "trippy" spacey feel
-      const delay = this.ctx.createDelay(1.0);
-      delay.delayTime.value = 0.375; // Dotted 8th note delay
-      const delayGain = this.ctx.createGain();
-      delayGain.gain.value = 0.3;
-      const delayFeedback = this.ctx.createGain();
-      delayFeedback.gain.value = 0.4;
-
-      globalFilter.connect(delay);
-      delay.connect(delayFeedback);
-      delayFeedback.connect(delay);
-      delay.connect(delayGain);
-      delayGain.connect(this.masterGain);
 
       // Kick Drum on 1, 5, 9, 13
       if (step % 4 === 0) {
@@ -626,6 +674,7 @@ class RetroAudio {
         kickGain.connect(globalFilter);
         kickOsc.start();
         kickOsc.stop(this.ctx.currentTime + 0.1);
+        kickOsc.onended = () => { kickOsc.disconnect(); kickGain.disconnect(); };
 
         // Sub-bass thump
         const subOsc = this.ctx.createOscillator();
@@ -639,21 +688,23 @@ class RetroAudio {
         subGain.connect(this.masterGain);
         subOsc.start();
         subOsc.stop(this.ctx.currentTime + 0.2);
+        subOsc.onended = () => { subOsc.disconnect(); subGain.disconnect(); };
       }
 
       // Snare/Hi-hat on off-beats
       if (step % 4 === 2 || (stage >= 3 && step % 2 === 1 && Math.random() > 0.7)) {
-        const hatBuffer = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.05, this.ctx.sampleRate);
-        const hatData = hatBuffer.getChannelData(0);
-        for(let i=0; i<hatData.length; i++) hatData[i] = Math.random() * 2 - 1;
-        const hat = this.ctx.createBufferSource();
-        hat.buffer = hatBuffer;
-        const hatGain = this.ctx.createGain();
-        hatGain.gain.setValueAtTime(step % 4 === 2 ? 0.05 : 0.02, this.ctx.currentTime);
-        hatGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.05);
-        hat.connect(hatGain);
-        hatGain.connect(globalFilter);
-        hat.start();
+        if (this.hatBuffer) {
+          const hat = this.ctx.createBufferSource();
+          hat.buffer = this.hatBuffer; // reuse pre-baked buffer
+          const hatGain = this.ctx.createGain();
+          hatGain.gain.setValueAtTime(step % 4 === 2 ? 0.05 : 0.02, this.ctx.currentTime);
+          hatGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.05);
+          hat.connect(hatGain);
+          hatGain.connect(globalFilter);
+          hat.start();
+          hat.stop(this.ctx.currentTime + 0.05);
+          hat.onended = () => { hat.disconnect(); hatGain.disconnect(); };
+        }
       }
 
       // Bassline
@@ -668,7 +719,6 @@ class RetroAudio {
         filter.frequency.value = stage === 2 ? 200 : 400; // Muffled for asteroid belt
 
         bassOsc.frequency.setValueAtTime(bassFreq / 2, this.ctx.currentTime);
-        // Add a bit of glide/portamento
         bassOsc.frequency.exponentialRampToValueAtTime(bassFreq / 2 * 0.9, this.ctx.currentTime + 0.1);
 
         bassGain.gain.setValueAtTime(0.1, this.ctx.currentTime);
@@ -679,6 +729,7 @@ class RetroAudio {
         bassGain.connect(globalFilter);
         bassOsc.start();
         bassOsc.stop(this.ctx.currentTime + 0.1);
+        bassOsc.onended = () => { bassOsc.disconnect(); filter.disconnect(); bassGain.disconnect(); };
       }
 
       // Lead Synth (Arpeggio/Syncopated)
@@ -690,13 +741,11 @@ class RetroAudio {
 
         const leadFilter = this.ctx.createBiquadFilter();
         leadFilter.type = 'bandpass';
-        // Trippy filter modulation
         const modFreq = 1000 + Math.sin(this.bgmStep * 0.2) * 800;
         leadFilter.frequency.value = modFreq;
         leadFilter.Q.value = 8;
 
         leadOsc.frequency.setValueAtTime(leadFreq, this.ctx.currentTime);
-        // Random pitch blips for "glitch" feel
         if (Math.random() > 0.9) {
           leadOsc.frequency.exponentialRampToValueAtTime(leadFreq * 2, this.ctx.currentTime + 0.05);
         }
@@ -709,6 +758,7 @@ class RetroAudio {
         leadGain.connect(globalFilter);
         leadOsc.start();
         leadOsc.stop(this.ctx.currentTime + 0.2);
+        leadOsc.onended = () => { leadOsc.disconnect(); leadFilter.disconnect(); leadGain.disconnect(); };
       }
 
       // Atmospheric Pad (Trippy drone)
@@ -726,6 +776,7 @@ class RetroAudio {
         padGain.connect(this.masterGain);
         padOsc.start();
         padOsc.stop(this.ctx.currentTime + 4.0);
+        padOsc.onended = () => { padOsc.disconnect(); padGain.disconnect(); };
       }
 
       this.bgmStep++;
@@ -751,6 +802,7 @@ class RetroAudio {
     gain.connect(this.masterGain);
     osc.start();
     osc.stop(this.ctx.currentTime + 0.05);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playUpgrade() {
@@ -768,6 +820,7 @@ class RetroAudio {
       gain.connect(this.masterGain!);
       osc.start(this.ctx!.currentTime + i * 0.1);
       osc.stop(this.ctx!.currentTime + i * 0.1 + 0.4);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
     });
   }
 
@@ -777,6 +830,7 @@ class RetroAudio {
       this.bgmInterval = null;
     }
     this.bgmStep = 0;
+    this.currentBGMStage = 0;
   }
 }
 

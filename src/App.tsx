@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Rocket, Trophy, Play, RotateCcw, Loader2, Zap, Maximize2, Shield, Cpu, Heart, Users, Activity, MousePointer2 } from 'lucide-react';
 import { generateGameAssets } from './services/assetGenerator';
@@ -12,7 +12,7 @@ import {
   CANVAS_WIDTH, CANVAS_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT, PLAYER_SPEED,
   SLINGSHOT_THRESHOLD, GRAZE_DISTANCE, MAX_OVERDRIVE, BULLET_SPEED,
   ENEMY_DIVE_SPEED, ENEMY_BULLET_SPEED, ENEMY_ROWS, ENEMY_COLS, ENEMY_SPACING,
-  isMobile, MAX_PARTICLES, MAX_TRAILS, MAX_BULLETS, MAX_ENEMY_BULLETS, ENABLE_SHADOWS,
+  isMobile, isIOS, isIOSStandalone, MAX_PARTICLES, MAX_TRAILS, MAX_BULLETS, MAX_ENEMY_BULLETS, ENABLE_SHADOWS,
 } from './constants';
 import {
   GameState, SlingshotWallMode, Bullet, Enemy, Particle, Trail, PowerUp, Scrap, Asteroid,
@@ -112,6 +112,41 @@ const REPAIR_POWERUP_LOW_HP_MULTIPLIER = 1.5;
 const REPAIR_POWERUP_DROP_COOLDOWN_MS = 10000;
 const REPAIR_POWERUP_MAX_DURING_BOSS = 1;
 
+/** Claims the first dead slot in pool and assigns bullet data. Returns false if pool is full. */
+function spawnBullet(
+  pool: Bullet[],
+  data: { x: number; y: number; vx?: number; vy?: number; damage?: number; size?: number; color?: string; isHoming?: boolean; isBeam?: boolean; deflected?: boolean; bounces?: number }
+): boolean {
+  for (let i = 0; i < pool.length; i++) {
+    if (!pool[i].alive) {
+      const b = pool[i];
+      b.alive = true; b.x = data.x; b.y = data.y;
+      b.vx = data.vx; b.vy = data.vy; b.damage = data.damage;
+      b.size = data.size; b.color = data.color;
+      b.isHoming = data.isHoming; b.isBeam = data.isBeam;
+      b.deflected = data.deflected; b.bounces = data.bounces;
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Claims the first dead slot in pool and assigns scrap data. Returns false if pool is full. */
+function spawnScrap(
+  pool: Scrap[],
+  data: { x: number; y: number; vx: number; vy: number; life: number }
+): boolean {
+  for (let i = 0; i < pool.length; i++) {
+    if (!pool[i].alive) {
+      const s = pool[i];
+      s.alive = true; s.x = data.x; s.y = data.y;
+      s.vx = data.vx; s.vy = data.vy; s.life = data.life;
+      return true;
+    }
+  }
+  return false;
+}
+
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasScaleRef = useRef(1); // rect.height / CANVAS_HEIGHT — updated in pointer event handlers
@@ -174,8 +209,12 @@ export default function App() {
   const isDualFighter = useRef(false);
   const isHacked = useRef(false);
   const hackStartTime = useRef(0);
-  const bullets = useRef<Bullet[]>([]);
-  const enemyBullets = useRef<Bullet[]>([]);
+  const bullets = useRef<Bullet[]>(
+    Array.from({ length: MAX_BULLETS }, () => ({ alive: false as boolean | undefined, x: 0, y: 0 }))
+  );
+  const enemyBullets = useRef<Bullet[]>(
+    Array.from({ length: MAX_ENEMY_BULLETS }, () => ({ alive: false as boolean | undefined, x: 0, y: 0 }))
+  );
   const enemies = useRef<Enemy[]>([]);
   const firepowerRef = useRef(1);
   const speedRef = useRef(1);
@@ -281,7 +320,9 @@ export default function App() {
 
   // Warp Transition State
   const isWarping = useRef(false);
-  const scraps = useRef<Scrap[]>([]);
+  const scraps = useRef<Scrap[]>(
+    Array.from({ length: isMobile ? 100 : 250 }, () => ({ alive: false as boolean | undefined, x: 0, y: 0, vx: 0, vy: 0, life: 0 }))
+  );
   const asteroids = useRef<Asteroid[]>([]);
   const obstacles = useRef<Obstacle[]>([]);
   const lastObstacleTime = useRef(0);
@@ -438,7 +479,13 @@ export default function App() {
     };
   }, []);
 
+  const [showIosHint, setShowIosHint] = useState(false);
+
   const toggleFullscreen = () => {
+    if (isIOS) {
+      setShowIosHint(h => !h);
+      return;
+    }
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(err => {
         console.error(`Error attempting to enable full-screen mode: ${err.message}`);
@@ -730,9 +777,11 @@ export default function App() {
     setStageProgress(0);
 
     stageStartTime.current = 0;
-    survivalTimerRef.current = 30;
+    survivalTimerRef.current = getSurvivalDurationFromStage(stage);
     setSurvivalTime(getSurvivalDurationFromStage(stage));
     blocks.current = [];
+    for (const s of scraps.current) s.alive = false;
+    asteroids.current = [];
 
     setWaveTitle(true);
     audio.playStageStart();
@@ -782,6 +831,7 @@ export default function App() {
       case 'WINGMAN':
         setHasWingman(true);
         wingmanRef.current = true;
+        wingmanPos.current = { x: playerPos.current.x + 50, y: playerPos.current.y + 10 };
         break;
       case 'DRONE':
         drones.current.push({ angle: Math.random() * Math.PI * 2, distance: 60, lastShot: 0 });
@@ -1108,14 +1158,14 @@ export default function App() {
     slingshotObstacleKickAt.current = 0;
     playerPos.current = { x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 };
     targetPos.current = { x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 };
-    bullets.current = [];
-    enemyBullets.current = [];
+    for (const b of bullets.current) b.alive = false;
+    for (const b of enemyBullets.current) b.alive = false;
     particles.current = [];
     trails.current = [];
     powerUps.current = [];
     lastRepairDropAt.current = 0;
     repairDropsDuringBossRef.current = 0;
-    scraps.current = [];
+    for (const s of scraps.current) s.alive = false;
     asteroids.current = [];
     blocks.current = [];
     obstacles.current = [];
@@ -1700,10 +1750,11 @@ export default function App() {
 
         const shockwaveRadius = 150 + (totalPower * 200);
         enemyBullets.current.forEach(b => {
+          if (!b.alive) return;
           const bdx = b.x - centerX;
           const bdy = b.y - centerY;
           if (Math.sqrt(bdx*bdx + bdy*bdy) < shockwaveRadius) {
-            b.y = -100;
+            b.alive = false;
             if (!isMobile) createExplosion(b.x, b.y, '#ffffff', 3);
           }
         });
@@ -2074,8 +2125,9 @@ export default function App() {
       grazeCount.current++;
       setScore(s => s + 10);
 
-    // Slow motion effect
+    // Brief slow motion effect (resets after 150ms, matching other hit-stop patterns)
     timeScale.current = 0.8;
+    setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 150);
 
     // Spark particles
     for (let i = 0; i < 2; i++) {
@@ -2110,14 +2162,14 @@ export default function App() {
     activeEffects.current['SHIELD'] = Math.max(activeEffects.current['SHIELD'] || 0, Date.now() + 3000);
   };
 
-  const openWheel = () => {
+  const openWheel = useCallback(() => {
     if (isWheelOpenRef.current) return;
     isWheelOpenRef.current = true;
     pauseStartTime.current = Date.now();
     setIsWheelOpen(true);
-  };
+  }, []);
 
-  const closeWheel = () => {
+  const closeWheel = useCallback(() => {
     if (!isWheelOpenRef.current) return;
     if (isOverdriveActiveRef.current && pauseStartTime.current > 0) {
       overdriveEndTime.current += (Date.now() - pauseStartTime.current);
@@ -2125,7 +2177,7 @@ export default function App() {
     pauseStartTime.current = 0;
     isWheelOpenRef.current = false;
     setIsWheelOpen(false);
-  };
+  }, []);
 
   // Game Loop
   const update = () => {
@@ -2168,8 +2220,8 @@ export default function App() {
     }
 
     // Decay effects - Move BEFORE early return so they don't get stuck
-    if (glitch.current > 0) glitch.current *= Math.pow(0.9, dt);
-    if (shake.current > 0) shake.current *= Math.pow(0.85, dt);
+    if (glitch.current > 0) glitch.current *= (1 - 0.1 * dt);
+    if (shake.current > 0) shake.current *= (1 - 0.15 * dt);
     if (shake.current < 0.5) shake.current = 0;
     if (flash.current > 0) flash.current -= 0.04 * dt;
     if (flash.current < 0) flash.current = 0;
@@ -2232,12 +2284,6 @@ export default function App() {
 
     // Keep object counts within a soft budget when frame time worsens.
     // Mobile caps are tighter to match MAX_ENEMY_BULLETS / MAX_PARTICLES constants.
-    const enemyBulletCap = isMobile
-      ? (isCriticalSim ? 80  : isReducedSim ? 120 : 150)
-      : (isCriticalSim ? 140 : isReducedSim ? 200 : 260);
-    if (enemyBullets.current.length > enemyBulletCap) {
-      enemyBullets.current.splice(0, enemyBullets.current.length - enemyBulletCap);
-    }
     const particleCap = isMobile
       ? (isCriticalSim ? 80  : isReducedSim ? 120 : 150)
       : (isCriticalSim ? 520 : isReducedSim ? 760 : 1000);
@@ -2279,7 +2325,7 @@ export default function App() {
     // Spawn Asteroids
     if ((isAsteroidBelt || isFinalFront) && !isWarping.current) {
       const spawnRate = isAsteroidBelt ? (isMobile ? 0.006 : 0.014) : (isMobile ? 0.008 : 0.02);
-      const maxAsteroids = isAsteroidBelt ? (isMobile ? 8 : 12) : 999;
+      const maxAsteroids = isAsteroidBelt ? (isMobile ? 8 : 12) : (isMobile ? 12 : 20);
       if (asteroids.current.length < maxAsteroids && Math.random() < spawnRate) {
         const rawSize = 30 + Math.random() * 60;
         const sizeScale = isAsteroidBelt ? (isMobile ? 0.72 : 0.86) : 1;
@@ -2343,7 +2389,7 @@ export default function App() {
       if (gameState === 'PLAYING') {
         const wingmanNow = Date.now();
         if (wingmanNow - lastShotTime.current > (isOverdriveActiveRef.current ? 75 : 150)) {
-          bullets.current.push({
+          spawnBullet(bullets.current, {
             x: wingmanPos.current.x + PLAYER_WIDTH / 2 - 2,
             y: wingmanPos.current.y,
             vx: 0, vy: -10, damage: firepowerRef.current, color: '#ff33cc'
@@ -2352,19 +2398,21 @@ export default function App() {
       }
 
       // Wingman collision with enemy bullets
-      enemyBullets.current.forEach((bullet, idx) => {
-        if (!wingmanRef.current) return;
+      for (let _wi = 0; _wi < enemyBullets.current.length; _wi++) {
+        const bullet = enemyBullets.current[_wi];
+        if (!bullet.alive) continue;
+        if (!wingmanRef.current) break;
         const dx = bullet.x - (wingmanPos.current.x + PLAYER_WIDTH / 2);
         const dy = bullet.y - (wingmanPos.current.y + PLAYER_HEIGHT / 2);
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist < 15) {
-          enemyBullets.current.splice(idx, 1);
+          bullet.alive = false;
           createExplosion(wingmanPos.current.x + PLAYER_WIDTH / 2, wingmanPos.current.y + PLAYER_HEIGHT / 2, '#ff33cc', 30);
           audio.playExplosion(wingmanPos.current.x);
           setHasWingman(false);
           wingmanRef.current = false;
         }
-      });
+      }
 
       // Wingman collision with enemies
       if (wingmanRef.current) {
@@ -2585,7 +2633,7 @@ export default function App() {
           // Drop scrap during ramming
           const scrapCount = isOverdriveActiveRef.current ? 5 : 1;
           for (let i = 0; i < scrapCount; i++) {
-            scraps.current.push({
+            spawnScrap(scraps.current, {
               x: enemy.x + enemy.width / 2,
               y: enemy.y + enemy.height / 2,
               vx: (Math.random() - 0.5) * 8,
@@ -2665,33 +2713,35 @@ export default function App() {
 
     // Update Scraps
     const sList = scraps.current;
-    for (let i = sList.length - 1; i >= 0; i--) {
+    const magnetRangeSq = (() => { const r = 150 + (magnetRef.current - 1) * 60; return r * r; })();
+    const magnetPullStrength = (0.5 + (magnetRef.current - 1) * 0.2) * dt;
+    for (let i = 0; i < sList.length; i++) {
       const s = sList[i];
+      if (!s.alive) continue;
       const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - s.x;
       const dy = (playerPos.current.y + PLAYER_HEIGHT / 2) - s.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
+      const distSq = dx * dx + dy * dy;
 
-      const magnetRange = 150 + (magnetRef.current - 1) * 60;
-      if (dist < magnetRange) {
-        // Magnet effect
-        const pullStrength = (0.5 + (magnetRef.current - 1) * 0.2) * dt;
-        s.vx += (dx / dist) * pullStrength;
-        s.vy += (dy / dist) * pullStrength;
+      // At critical sim tier, skip magnet pull — player can still collect by proximity
+      if (!isCriticalSim && distSq < magnetRangeSq) {
+        // Magnet effect — only compute sqrt when inside range
+        const dist = Math.sqrt(distSq);
+        s.vx += (dx / dist) * magnetPullStrength;
+        s.vy += (dy / dist) * magnetPullStrength;
       }
 
       s.x += s.vx * dt;
       s.y += s.vy * dt;
-      s.vx *= Math.pow(0.95, dt);
-      s.vy *= Math.pow(0.95, dt);
+      const sFric = 1 - 0.05 * dt; s.vx *= sFric; s.vy *= sFric;
       s.y += 1 * dt; // Drift down
 
-      if (dist < 30) {
+      if (distSq < 30 * 30) {
         handleScrapCollection(s);
         s.life = 0;
       }
 
       if (s.y >= CANVAS_HEIGHT || s.life <= 0) {
-        sList.splice(i, 1);
+        s.alive = false;
       }
     }
 
@@ -2707,7 +2757,7 @@ export default function App() {
         drone.lastShot = now;
         const dx = playerPos.current.x + PLAYER_WIDTH / 2 + Math.cos(drone.angle) * drone.distance;
         const dy = playerPos.current.y + PLAYER_HEIGHT / 2 + Math.sin(drone.angle) * drone.distance;
-        bullets.current.push({
+        spawnBullet(bullets.current, {
           x: dx,
           y: dy,
           vx: 0,
@@ -3002,43 +3052,56 @@ export default function App() {
     if (shieldState.active && !isSlingshotAttacking && !isOverdriveActiveRef.current && isSlingshotMode.current && isDragging) {
       const ENERGY_WALL_BULLET_GAIN = 2; // ~50 bullets to full; each of 4 stages = ~12 bullets
       const ENERGY_WALL_HP_GAIN = 1;     // +1 integrity per bullet absorbed in HP_ABSORB mode
-      enemyBullets.current = enemyBullets.current.filter(b => {
-        if (b.isBeam) return true; // Beams are deflected by shield, not absorbed
-        if (!doesShieldCatchPoint(b.x, b.y, 20)) return true;
+      // Track accumulated changes so we can batch React state updates after the filter.
+      // Calling setOverdrive/setIntegrity per-bullet during a dense boss volley causes
+      // 30–50 re-renders per drag, which stalls the game loop on mobile.
+      let odGainedThisPass = 0;
+      let hpGainedThisPass = 0;
+      let overdriveFiredThisPass = false;
+      for (let _ebi = 0; _ebi < enemyBullets.current.length; _ebi++) {
+        const b = enemyBullets.current[_ebi];
+        if (!b.alive) continue;
+        if (b.isBeam) continue; // Beams are deflected by shield, not absorbed
+        if (!doesShieldCatchPoint(b.x, b.y, 20)) continue;
         if (wallModeRef.current === 'HP_ABSORB') {
           if (integrityRef.current >= 100) {
             // HP full: fall back to OD charge without switching mode
-            if (odReadyRef.current) {
+            if (odReadyRef.current && !overdriveFiredThisPass) {
+              overdriveFiredThisPass = true;
               activateOverdrive();
-              return false;
+              b.alive = false; continue;
             }
             overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + ENERGY_WALL_BULLET_GAIN);
-            setOverdrive(overdriveGauge.current);
+            odGainedThisPass += ENERGY_WALL_BULLET_GAIN;
             if (overdriveGauge.current >= MAX_OVERDRIVE) {
               flash.current = Math.max(flash.current, 0.25);
             }
             createExplosion(b.x, b.y, '#ffcc00', 2);
           } else {
             const healed = Math.min(100, integrityRef.current + ENERGY_WALL_HP_GAIN);
+            hpGainedThisPass += healed - integrityRef.current;
             integrityRef.current = healed;
-            setIntegrity(healed);
             createExplosion(b.x, b.y, '#00ffcc', 2);
           }
-          return false;
+          b.alive = false; continue;
         }
         // OD_CHARGE (default)
-        if (odReadyRef.current) {
+        if (odReadyRef.current && !overdriveFiredThisPass) {
+          overdriveFiredThisPass = true;
           activateOverdrive();
-          return false;
+          b.alive = false; continue;
         }
         overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + ENERGY_WALL_BULLET_GAIN);
-        setOverdrive(overdriveGauge.current);
+        odGainedThisPass += ENERGY_WALL_BULLET_GAIN;
         if (overdriveGauge.current >= MAX_OVERDRIVE) {
           flash.current = Math.max(flash.current, 0.25);
         }
         createExplosion(b.x, b.y, '#ffcc00', 2);
-        return false;
-      });
+        b.alive = false; continue;
+      }
+      // Flush batched state updates — one React render instead of one per bullet.
+      if (odGainedThisPass > 0) setOverdrive(overdriveGauge.current);
+      if (hpGainedThisPass > 0) setIntegrity(integrityRef.current);
       odReadyRef.current = overdriveGauge.current >= MAX_OVERDRIVE && !isOverdriveActiveRef.current;
     }
 
@@ -3047,6 +3110,7 @@ export default function App() {
     if (isSlingshotAttacking) {
       const wakeRadius = 72;
       enemyBullets.current.forEach(b => {
+        if (!b.alive) return;
         const wdx = b.x - playerCenterX;
         const wdy = b.y - playerCenterY;
         const wDist = Math.sqrt(wdx * wdx + wdy * wdy);
@@ -3209,17 +3273,18 @@ export default function App() {
 
       // Collision with bullets
       bullets.current.forEach(bullet => {
+        if (!bullet.alive) return;
         if (block.hp > 0 &&
             bullet.x > block.x && bullet.x < block.x + block.width &&
             bullet.y > block.y && bullet.y < block.y + block.height) {
           if (block.type !== 'WALL' && block.type !== 'WINDMILL') {
             block.hp -= (bullet.damage || 1);
-            bullet.y = -100;
+            bullet.alive = false;
             if (block.hp <= 0) {
               triggerChainExplosion(block);
             }
           } else if (block.type !== 'WINDMILL') {
-            bullet.y = -100; // Indestructible block (WALL)
+            bullet.alive = false; // Indestructible block (WALL)
           }
           // WINDMILL body is transparent to bullets; blade arc check below.
         }
@@ -3244,8 +3309,8 @@ export default function App() {
             }
             return false;
           };
-          bullets.current.forEach(b => { if (b.y > -50 && hitsWindmillBlade(b.x, b.y)) b.y = -100; });
-          enemyBullets.current.forEach(b => { if (b.y > -50 && b.y < CANVAS_HEIGHT + 50 && hitsWindmillBlade(b.x, b.y)) b.y = -100; });
+          bullets.current.forEach(b => { if (b.alive && hitsWindmillBlade(b.x, b.y)) b.alive = false; });
+          enemyBullets.current.forEach(b => { if (b.alive && b.y < CANVAS_HEIGHT + 50 && hitsWindmillBlade(b.x, b.y)) b.alive = false; });
         }
       }
     });
@@ -3287,7 +3352,7 @@ export default function App() {
         // Spawn bullet at barrel tip (matches render: tr + 14px from center)
         const tr = Math.min(block.width, block.height) * 0.26;
         const barrelTip = tr + 14;
-        enemyBullets.current.push({
+        spawnBullet(enemyBullets.current, {
           x: cx + (dx / dist) * barrelTip,
           y: cy + (dy / dist) * barrelTip,
           vx: (dx / dist) * speed,
@@ -3330,7 +3395,7 @@ export default function App() {
         const speed = 3.8;
         const hexR = Math.min(block.width, block.height) * 0.28;
         const aimAngle = Math.atan2(dy, dx);
-        enemyBullets.current.push({
+        spawnBullet(enemyBullets.current, {
           x: cx + Math.cos(aimAngle) * (hexR + 14),
           y: cy + Math.sin(aimAngle) * (hexR + 14),
           vx: (dx / dist) * speed,
@@ -3348,6 +3413,7 @@ export default function App() {
     // Beams also damage alive enemies on contact.
     for (let bi = enemyBullets.current.length - 1; bi >= 0; bi--) {
       const b = enemyBullets.current[bi];
+      if (!b.alive) continue;
       if (!b.deflected || !b.isBeam) continue;
       const MAX_BEAM_BOUNCES = 7;
 
@@ -3421,7 +3487,7 @@ export default function App() {
           break;
         }
       }
-      if (removeBeam) { enemyBullets.current.splice(bi, 1); continue; }
+      if (removeBeam) { b.alive = false; continue; }
 
       // vs alive enemies
       for (let ei = 0; ei < enemies.current.length; ei++) {
@@ -3445,13 +3511,11 @@ export default function App() {
             audio.playExplosion(e.x + e.width / 2);
             setScore(s => s + 150);
           }
-          enemyBullets.current.splice(bi, 1);
+          b.alive = false;
           break;
         }
       }
     }
-
-    // BEAM_TURRET mobile: horizontal slide on rail between wall bounds, pause to aim before firing
     {
       const now = Date.now();
       blocks.current.forEach(turret => {
@@ -3472,14 +3536,20 @@ export default function App() {
     blocks.current = blocks.current.filter(b => b.y < CANVAS_HEIGHT + 100);
 
     asteroids.current.forEach(a => {
+      // Skip dead or far-off-screen asteroids — the filter below will clean them up next tick.
+      if (a.hp <= 0) return;
+      const margin = a.size + 50;
+      if (a.y > CANVAS_HEIGHT + margin || a.y < -margin || a.x < -margin || a.x > CANVAS_WIDTH + margin) return;
+
       // Movement with inertia
       a.x += (a.dx + a.vx) * worldSpeedScale * dt;
       a.y += (a.speed + a.vy) * worldSpeedScale * dt;
       a.rotation += a.vr * worldSpeedScale * dt;
 
-      // Friction for vx/vy
-      a.vx *= Math.pow(0.98, dt);
-      a.vy *= Math.pow(0.98, dt);
+      // Friction for vx/vy — linear approximation of pow(0.98, dt); exact at dt=1, accurate within 0.3% for dt<3.
+      const friction = 1 - 0.02 * dt;
+      a.vx *= friction;
+      a.vy *= friction;
 
       // Repulsion Field (Passive)
       // If player is close, push asteroid away slowly
@@ -3530,15 +3600,17 @@ export default function App() {
         }
       }
 
-      // Collision with enemies (Kinetic Weapon)
+      // Collision with enemies (Kinetic Weapon) — skip if asteroid is barely moving
+      const combinedVelCheck = a.vx * a.vx + a.vy * a.vy;
       enemies.current.forEach(e => {
         if (!e.alive) return;
+        if (combinedVelCheck < 1) return; // too slow to deal damage, skip
         const edx = e.x + e.width / 2 - a.x;
         const edy = e.y + e.height / 2 - a.y;
         const edist = Math.sqrt(edx * edx + edy * edy);
-        const combinedVel = Math.sqrt(a.vx * a.vx + a.vy * a.vy);
 
-        if (edist < a.size + e.width / 2 && combinedVel > 1) {
+        if (edist < a.size + e.width / 2) {
+          const combinedVel = Math.sqrt(combinedVelCheck);
           const damage = Math.floor(combinedVel * a.size * 0.5);
           e.health! -= damage;
           createExplosion(e.x + e.width / 2, e.y + e.height / 2, '#ffffff', 10);
@@ -3553,10 +3625,12 @@ export default function App() {
         }
       });
 
-      // Collision with bullets
+      // Collision with bullets — early-out if bullet is far from asteroid bounds
       bullets.current.forEach(b => {
+        if (!b.alive) return;
         const bdx = b.x - a.x;
         const bdy = b.y - a.y;
+        if (Math.abs(bdx) > a.size || Math.abs(bdy) > a.size) return; // cheap AABB pre-check
         const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
         if (bdist < a.size) {
           a.hp -= (b.damage || 1);
@@ -3566,7 +3640,7 @@ export default function App() {
           a.vx += (b.vx || 0) * 0.1 * pushForce;
           a.vy += (b.vy || -10) * 0.1 * pushForce;
 
-          b.y = -100; // Remove bullet
+          b.alive = false; // Remove bullet
 
           // Hit feedback: small flash particles
           if (Math.random() > 0.5) {
@@ -3588,7 +3662,7 @@ export default function App() {
             // Drop scrap from asteroids
             const scrapCount = Math.floor(a.size / 20);
             for (let i = 0; i < scrapCount; i++) {
-              scraps.current.push({
+              spawnScrap(scraps.current, {
                 x: a.x,
                 y: a.y,
                 vx: (Math.random() - 0.5) * 6,
@@ -3602,7 +3676,9 @@ export default function App() {
               const numFragments = isAsteroidBelt
                 ? (Math.random() < 0.6 ? 1 : 2) // Stage 2 fairness: fewer splits
                 : Math.floor(Math.random() * 2) + 2; // 2-3 fragments
+              const fragCap = isAsteroidBelt ? (isMobile ? 8 : 12) : (isMobile ? 12 : 20);
               for(let i=0; i<numFragments; i++) {
+                if (asteroids.current.length >= fragCap) break;
                 const fragSize = a.size * 0.5;
                 const angle = (i / numFragments) * Math.PI * 2 + Math.random() * 0.5;
                 const fragVertices = [];
@@ -3751,10 +3827,11 @@ export default function App() {
 
       // Collision with bullets
       bullets.current.forEach(b => {
+        if (!b.alive) return;
         if (b.x > obs.x && b.x < obs.x + obs.width &&
             b.y > obs.y && b.y < obs.y + obs.height) {
           obs.hp -= (b.damage || 1);
-          b.y = -100; // Remove bullet
+          b.alive = false; // Remove bullet
           if (obs.hp <= 0) {
             audio.playExplosion(obs.x + obs.width / 2);
             createExplosion(obs.x + obs.width / 2, obs.y + obs.height / 2, obs.color, 20);
@@ -3810,7 +3887,7 @@ export default function App() {
           // Super Overdrive Shot — mobile fires 3-spread to save bullet/collision cost
           const spreadRange = isMobile ? 1 : 2; // mobile: -1..1 (3 bullets), desktop: -2..2 (5)
           for (let i = -spreadRange; i <= spreadRange; i++) {
-            bullets.current.push({
+            spawnBullet(bullets.current, {
               x: playerPos.current.x + PLAYER_WIDTH / 2 - bulletSize / 2 + i * 15,
               y: playerPos.current.y,
               vx: i * 0.5,
@@ -3820,11 +3897,11 @@ export default function App() {
             });
           }
         } else if (isMulti) {
-          bullets.current.push({ x: playerPos.current.x + PLAYER_WIDTH / 2 - 10, y: playerPos.current.y, damage: bulletDamage, size: bulletSize });
-          bullets.current.push({ x: playerPos.current.x + PLAYER_WIDTH / 2 + 6, y: playerPos.current.y, damage: bulletDamage, size: bulletSize });
-          bullets.current.push({ x: playerPos.current.x + PLAYER_WIDTH / 2 - 2, y: playerPos.current.y - 10, damage: bulletDamage, size: bulletSize });
+          spawnBullet(bullets.current, { x: playerPos.current.x + PLAYER_WIDTH / 2 - 10, y: playerPos.current.y, damage: bulletDamage, size: bulletSize });
+          spawnBullet(bullets.current, { x: playerPos.current.x + PLAYER_WIDTH / 2 + 6, y: playerPos.current.y, damage: bulletDamage, size: bulletSize });
+          spawnBullet(bullets.current, { x: playerPos.current.x + PLAYER_WIDTH / 2 - 2, y: playerPos.current.y - 10, damage: bulletDamage, size: bulletSize });
         } else {
-          bullets.current.push({
+          spawnBullet(bullets.current, {
             x: playerPos.current.x + PLAYER_WIDTH / 2 - bulletSize / 2,
             y: playerPos.current.y,
             damage: bulletDamage,
@@ -3838,21 +3915,23 @@ export default function App() {
 
     // Update bullets
     const bulletList = bullets.current;
-    for (let i = bulletList.length - 1; i >= 0; i--) {
+    for (let i = 0; i < bulletList.length; i++) {
       const b = bulletList[i];
+      if (!b.alive) continue;
       b.x += (b.vx || 0) * timeScale.current * dt;
       b.y += (b.vy || -BULLET_SPEED) * timeScale.current * dt;
 
       if (b.y < -20 || b.y > CANVAS_HEIGHT + 20) {
-        bulletList.splice(i, 1);
+        b.alive = false;
       }
     }
 
     // Update enemy bullets
     const currentEnemyBulletSpeed = (ENEMY_BULLET_SPEED + waveRef.current * 0.2) * worldSpeedScale;
     const enemyBulletList = enemyBullets.current;
-    for (let i = enemyBulletList.length - 1; i >= 0; i--) {
+    for (let i = 0; i < enemyBulletList.length; i++) {
       const b = enemyBulletList[i];
+      if (!b.alive) continue;
       let vx = b.vx || 0;
       let vy = b.vy || currentEnemyBulletSpeed;
 
@@ -3885,9 +3964,9 @@ export default function App() {
         else if (b.x > CANVAS_WIDTH) { b.x = CANVAS_WIDTH; b.vx = -Math.abs(b.vx ?? 0); b.bounces = (b.bounces ?? 0) + 1; }
         if (b.y < 0) { b.y = 0; b.vy = Math.abs(b.vy ?? 0); b.bounces = (b.bounces ?? 0) + 1; }
         else if (b.y > CANVAS_HEIGHT) { b.y = CANVAS_HEIGHT; b.vy = -Math.abs(b.vy ?? 0); b.bounces = (b.bounces ?? 0) + 1; }
-        if ((b.bounces ?? 0) >= MAX_BEAM_BOUNCES) { enemyBulletList.splice(i, 1); continue; }
+        if ((b.bounces ?? 0) >= MAX_BEAM_BOUNCES) { b.alive = false; continue; }
       } else if (b.y > CANVAS_HEIGHT + 20 || b.y < -30 || b.x < -20 || b.x > CANVAS_WIDTH + 20) {
-        enemyBulletList.splice(i, 1);
+        b.alive = false;
       }
     }
 
@@ -3917,7 +3996,7 @@ export default function App() {
             for (let i = 0; i < 2; i++) {
               setTimeout(() => {
                 if (!shooter.alive) return;
-                enemyBullets.current.push({
+                spawnBullet(enemyBullets.current, {
                   x: shooter.x + shooter.width / 2 - 2,
                   y: shooter.y + shooter.height,
                   vx: (dx / distance) * currentEnemyBulletSpeed * 1.2,
@@ -3950,7 +4029,7 @@ export default function App() {
             for (let i = 0; i < 3; i++) {
               setTimeout(() => {
                 if (!shooter.alive) return;
-                enemyBullets.current.push({
+                spawnBullet(enemyBullets.current, {
                   x: shooter.x + shooter.width / 2 - 2,
                   y: shooter.y + shooter.height,
                   vx: (dx / distance) * currentEnemyBulletSpeed * 1.5,
@@ -3964,7 +4043,7 @@ export default function App() {
         };
 
         const newBullets = shootPattern(shooter.type);
-        newBullets.forEach(b => enemyBullets.current.push(b));
+        newBullets.forEach(b => spawnBullet(enemyBullets.current, b));
         if (newBullets.length > 0) audio.playEnemyShoot(shooter.x + shooter.width / 2);
       }
     }
@@ -3984,8 +4063,9 @@ export default function App() {
       if (enemy.stunnedUntil && enemy.stunnedUntil > currentTime) {
         enemy.x += (enemy.knockbackVX || 0) * dt;
         enemy.y += (enemy.knockbackVY || 0) * dt;
-        enemy.knockbackVX = (enemy.knockbackVX || 0) * Math.pow(0.9, dt);
-        enemy.knockbackVY = (enemy.knockbackVY || 0) * Math.pow(0.9, dt);
+        const kbFric = 1 - 0.1 * dt;
+        enemy.knockbackVX = (enemy.knockbackVX || 0) * kbFric;
+        enemy.knockbackVY = (enemy.knockbackVY || 0) * kbFric;
         return;
       }
 
@@ -4072,8 +4152,14 @@ export default function App() {
             }
           } else if (enemy.bossType === BossType.SWARM) {
             // Spawns small fast enemies (capped to avoid runaway array growth)
-            const liveSubCount = enemies.current.filter(e => e.alive && !e.isBoss).length;
-            if (liveSubCount < 8 && currentTime - (enemy.lastShotTime || 0) > (enemy.phase === 3 ? 1400 : 2600)) {
+            let liveSubCount = 0;
+            for (let si = 0; si < enemies.current.length; si++) {
+              const e = enemies.current[si];
+              if (e.alive && !e.isBoss) liveSubCount++;
+            }
+            // At reduced sim tier, cap sub-enemies at 4 — halves chase/render cost during SWARM fight.
+            const swarmSubCap = isReducedSim ? 4 : 8;
+            if (liveSubCount < swarmSubCap && currentTime - (enemy.lastShotTime || 0) > (enemy.phase === 3 ? 1400 : 2600)) {
               enemy.lastShotTime = currentTime;
               for (let i = 0; i < 2; i++) {
                 const offsetX = (Math.random() - 0.5) * 60;
@@ -4165,7 +4251,7 @@ export default function App() {
                 const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - tip.x;
                 const dy = (playerPos.current.y + PLAYER_HEIGHT / 2) - tip.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
-                enemyBullets.current.push({
+                spawnBullet(enemyBullets.current, {
                   x: tip.x, y: tip.y,
                   vx: (dx / dist) * 3.5, vy: (dy / dist) * 3.5
                 });
@@ -4180,7 +4266,9 @@ export default function App() {
             const loadAdjustedRotationSpeed = laserRotationSpeed;
             enemy.tractorBeamTimer += dt * (1000 / 60) * timeScale.current * loadAdjustedRotationSpeed;
             const angle = (enemy.tractorBeamTimer / 1000) * Math.PI;
-            const laserCount = enemy.phase === 3 ? 4 : 2;
+            // At reduced sim tier, cap to 2 beams — matches the render cap so player
+            // is never hit by beams that are not drawn.
+            const laserCount = (enemy.phase === 3 && !isReducedSim) ? 4 : 2;
 
             for (let i = 0; i < laserCount; i++) {
               const laserAngle = angle + (i * Math.PI * 2 / laserCount);
@@ -4227,7 +4315,7 @@ export default function App() {
               : (enemy.phase === 3 ? 7 : 5);
             for (let i = 0; i < count; i++) {
               const angle = (Math.PI / count) * i + Math.PI / 4;
-              enemyBullets.current.push({
+              spawnBullet(enemyBullets.current, {
                 x: enemy.x + enemy.width / 2,
                 y: enemy.y + enemy.height,
                 vx: Math.cos(angle) * 4,
@@ -4247,7 +4335,7 @@ export default function App() {
           const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
           const dy = playerPos.current.y - (enemy.y + enemy.height / 2);
           const dist = Math.sqrt(dx * dx + dy * dy);
-          enemyBullets.current.push({
+          spawnBullet(enemyBullets.current, {
             x: enemy.x + enemy.width / 2,
             y: enemy.y + enemy.height / 2,
             vx: (dx / dist) * 3,
@@ -4423,8 +4511,11 @@ export default function App() {
 
     // Final Separation Pass (Post-movement)
     // This ensures enemies don't overlap even if their formulas try to put them in the same spot
-    // On mobile, run every other frame — visual difference is imperceptible; saves O(n²) work.
-    if (!isMobile || frameCounterRef.current % 2 === 0) enemies.current.forEach((enemy) => {
+    // Mobile: skip every other frame at tier 0–1; skip entirely at tier 2 (saves O(n²) work).
+    const runSeparation = !isMobile
+      ? true
+      : isCriticalSim ? false : frameCounterRef.current % 2 === 0;
+    if (runSeparation) enemies.current.forEach((enemy) => {
       if (!enemy.alive || enemy.state === 'ENTERING' || enemy.isBoss) return;
 
       enemies.current.forEach((other) => {
@@ -4573,18 +4664,19 @@ export default function App() {
     }
 
     // Collision detection
-    const aliveEnemies = enemies.current.filter(e => e.alive);
-    const hasAliveBoss = aliveEnemies.some(e => e.isBoss);
+    const hasAliveBoss = enemies.current.some(e => e.alive && e.isBoss);
     if (!hasAliveBoss) {
       repairDropsDuringBossRef.current = 0;
     }
     const playerBullets = bullets.current;
 
-    for (let i = playerBullets.length - 1; i >= 0; i--) {
+    for (let i = 0; i < playerBullets.length; i++) {
       const bullet = playerBullets[i];
+      if (!bullet.alive) continue;
 
-      for (let j = 0; j < aliveEnemies.length; j++) {
-        const enemy = aliveEnemies[j];
+      for (let j = 0; j < enemies.current.length; j++) {
+        const enemy = enemies.current[j];
+        if (!enemy.alive) continue;
         if (enemy.state === 'ENTERING') continue; // Immune while forming up (Galaga-style)
         if (bullet.x > enemy.x && bullet.x < enemy.x + enemy.width &&
             bullet.y > enemy.y && bullet.y < enemy.y + enemy.height) {
@@ -4609,8 +4701,8 @@ export default function App() {
 
           // Tesla Arc (Chain Lightning)
           if (chainLightningRef.current > 0) {
-            const nearby = aliveEnemies.filter(e => e !== enemy);
-            nearby.forEach(e => {
+            enemies.current.forEach(e => {
+              if (!e.alive || e === enemy) return;
               const edx = enemy.x - e.x;
               const edy = enemy.y - e.y;
               const edist = Math.sqrt(edx * edx + edy * edy);
@@ -4645,7 +4737,7 @@ export default function App() {
               setBossHealth({ current: enemy.health!, max: enemy.maxHealth! });
               lastBossHealthUpdateAt.current = bossNow;
             }
-            playerBullets.splice(i, 1);
+            bullet.alive = false;
             audio.playEnemyHit(enemy.x + enemy.width / 2);
             flash.current = 0.2;
 
@@ -4678,7 +4770,7 @@ export default function App() {
 
               // Drop many scraps
               for (let i = 0; i < 20; i++) {
-                scraps.current.push({
+                spawnScrap(scraps.current, {
                   x: enemy.x + enemy.width / 2,
                   y: enemy.y + enemy.height / 2,
                   vx: (Math.random() - 0.5) * 10,
@@ -4700,15 +4792,14 @@ export default function App() {
           if (isOverdriveActiveRef.current) {
             createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ff3366', 50);
             // Damage nearby enemies
-            aliveEnemies.forEach(other => {
-              if (other.alive && other !== enemy) {
-                const dx = (other.x + other.width/2) - (enemy.x + enemy.width/2);
-                const dy = (other.y + other.height/2) - (enemy.y + enemy.height/2);
-                const dist = Math.sqrt(dx*dx + dy*dy);
-                if (dist < 150) {
-                  other.health = (other.health || 0) - 50;
-                  if (other.health <= 0) other.alive = false;
-                }
+            enemies.current.forEach(other => {
+              if (!other.alive || other === enemy) return;
+              const dx = (other.x + other.width/2) - (enemy.x + enemy.width/2);
+              const dy = (other.y + other.height/2) - (enemy.y + enemy.height/2);
+              const dist = Math.sqrt(dx*dx + dy*dy);
+              if (dist < 150) {
+                other.health = (other.health || 0) - 50;
+                if (other.health <= 0) other.alive = false;
               }
             });
           }
@@ -4717,14 +4808,14 @@ export default function App() {
           if (hasChrono && !isOverdriveActiveRef.current && Math.random() < 0.15) {
             timeScale.current = 0.3;
           }
-          playerBullets.splice(i, 1);
+          bullet.alive = false;
 
           // Drop scrap
           const scrapChance = isOverdriveActiveRef.current ? 1.0 : 0.6;
           const scrapCount = isOverdriveActiveRef.current ? 3 : 1;
           if (Math.random() < scrapChance) {
             for (let k = 0; k < scrapCount; k++) {
-              scraps.current.push({
+              spawnScrap(scraps.current, {
                 x: enemy.x + enemy.width / 2,
                 y: enemy.y + enemy.height / 2,
                 vx: (Math.random() - 0.5) * (isOverdriveActiveRef.current ? 8 : 4),
@@ -4811,8 +4902,9 @@ export default function App() {
 
     let playerHit = false;
 
-    for (let i = 0; i < aliveEnemies.length; i++) {
-      const enemy = aliveEnemies[i];
+    for (let i = 0; i < enemies.current.length; i++) {
+      const enemy = enemies.current[i];
+      if (!enemy.alive) continue;
       const inPlayerBox = isSlingshotAttacking ? (
         enemy.x < sweptRight &&
         enemy.x + enemy.width > sweptLeft &&
@@ -4897,8 +4989,12 @@ export default function App() {
     }
 
     const eBullets = enemyBullets.current;
-    for (let i = eBullets.length - 1; i >= 0; i--) {
+    // Accumulators for guard-window bullet absorption — flush once after loop.
+    let guardHpGain = 0;
+    let guardOdGain = 0;
+    for (let i = 0; i < eBullets.length; i++) {
       const bullet = eBullets[i];
+      if (!bullet.alive) continue;
       const bulletCenterX = bullet.x + 2;
       const bulletCenterY = bullet.y + 6;
       // Graze Detection for bullets
@@ -4935,7 +5031,7 @@ export default function App() {
           emitSlingshotShieldImpact(bulletCenterX, bulletCenterY, 1.8);
         } else if (!bullet.deflected && bullet.x > px && bullet.x < px + pw && bullet.y > py && bullet.y < py + ph) {
           playerHit = true;
-          eBullets.splice(i, 1);
+          eBullets[i].alive = false;
         }
         continue;
       }
@@ -4943,23 +5039,26 @@ export default function App() {
       if (doesShieldCatchPoint(bulletCenterX, bulletCenterY, 4)) {
           emitSlingshotShieldImpact(bulletCenterX, bulletCenterY, 0.9);
           if (wallModeRef.current === 'HP_ABSORB' && integrityRef.current < 100) {
-            const healed = Math.min(100, integrityRef.current + 1); // +1 integrity, same as energy-wall
+            const healed = Math.min(100, integrityRef.current + 1);
+            guardHpGain += healed - integrityRef.current;
             integrityRef.current = healed;
-            setIntegrity(healed);
-          } else if (wallModeRef.current !== 'HP_ABSORB' || integrityRef.current >= 100) {
+          } else {
             overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + 2);
-            setOverdrive(overdriveGauge.current);
+            guardOdGain += 2;
           }
-          eBullets.splice(i, 1);
+          eBullets[i].alive = false;
           continue;
       }
 
       if (bullet.x > px && bullet.x < px + pw &&
           bullet.y > py && bullet.y < py + ph) {
         playerHit = true;
-        eBullets.splice(i, 1);
+        eBullets[i].alive = false;
       }
     }
+    // Flush guard-window absorption state — single React render regardless of how many bullets were caught.
+    if (guardHpGain > 0) setIntegrity(integrityRef.current);
+    if (guardOdGain > 0) setOverdrive(overdriveGauge.current);
 
     // Emergency spacing: if durable enemies and bullets overfill the local area, clear a minimal escape lane.
     if (
@@ -4970,7 +5069,7 @@ export default function App() {
       const playerCX = playerPos.current.x + PLAYER_WIDTH / 2;
       const playerCY = playerPos.current.y + PLAYER_HEIGHT / 2;
 
-      const hardEnemies = aliveEnemies.filter((enemy) => {
+      const hardEnemies = enemies.current.filter((enemy) => {
         if (!enemy.alive || enemy.isBoss) return false;
         const isDurableType = enemy.type >= 2 || enemy.type === 4;
         if (!isDurableType) return false;
@@ -4981,16 +5080,20 @@ export default function App() {
         return (dx * dx + dy * dy) <= AUTO_SPACE_HARD_ENEMY_RADIUS * AUTO_SPACE_HARD_ENEMY_RADIUS;
       });
 
-      const nearbyBulletIndices = eBullets
-        .map((bullet, index) => {
-          const bx = bullet.x + 2;
-          const by = bullet.y + 6;
-          const dx = bx - playerCX;
-          const dy = by - playerCY;
-          return { index, distSq: dx * dx + dy * dy };
-        })
-        .filter((item) => item.distSq <= AUTO_SPACE_BULLET_RADIUS * AUTO_SPACE_BULLET_RADIUS)
-        .sort((a, b) => a.distSq - b.distSq);
+      const nearbyBulletIndices: { index: number; distSq: number }[] = [];
+      for (let _bi = 0; _bi < eBullets.length; _bi++) {
+        const bullet = eBullets[_bi];
+        if (!bullet.alive) continue;
+        const bx = bullet.x + 2;
+        const by = bullet.y + 6;
+        const dx = bx - playerCX;
+        const dy = by - playerCY;
+        const distSq = dx * dx + dy * dy;
+        if (distSq <= AUTO_SPACE_BULLET_RADIUS * AUTO_SPACE_BULLET_RADIUS) {
+          nearbyBulletIndices.push({ index: _bi, distSq });
+        }
+      }
+      nearbyBulletIndices.sort((a, b) => a.distSq - b.distSq);
 
       if (hardEnemies.length >= AUTO_SPACE_MIN_HARD_ENEMIES && nearbyBulletIndices.length >= AUTO_SPACE_MIN_BULLETS) {
         hardEnemies
@@ -5011,13 +5114,11 @@ export default function App() {
             }
           });
 
-        const removeIndices = nearbyBulletIndices
+        nearbyBulletIndices
           .slice(0, AUTO_SPACE_BULLET_CLEAR_MAX)
-          .map((item) => item.index)
-          .sort((a, b) => b - a);
-        removeIndices.forEach((index) => {
-          if (index >= 0 && index < eBullets.length) eBullets.splice(index, 1);
-        });
+          .forEach(({ index }) => {
+            if (index >= 0 && index < eBullets.length) eBullets[index].alive = false;
+          });
 
         invulnerableUntil.current = Math.max(invulnerableUntil.current, frameNow + 260);
         flash.current = Math.max(flash.current, 0.18);
@@ -5104,7 +5205,7 @@ export default function App() {
         integrityRef.current -= damage;
         setIntegrity(integrityRef.current);
         invulnerableUntil.current = Date.now() + 2000;
-        enemyBullets.current = []; // Clear bullets to give a chance to recover
+        for (const b of enemyBullets.current) b.alive = false; // Clear bullets to give a chance to recover
         if (comboRef.current > 5) audio.playComboBreak();
         comboRef.current = 0;
         setCombo(0);
@@ -5146,8 +5247,7 @@ export default function App() {
       } else {
         p.x += p.vx * dt;
         p.y += p.vy * dt;
-        p.vx *= Math.pow(0.95, dt); // friction
-        p.vy *= Math.pow(0.95, dt);
+        const pFric = 1 - 0.05 * dt; p.vx *= pFric; p.vy *= pFric; // friction
       }
       if (p.rotation !== undefined && p.vr !== undefined) {
         p.rotation += p.vr * dt;
@@ -5159,8 +5259,11 @@ export default function App() {
       }
     }
 
-    // Prune dead enemies to prevent unbounded array growth (SWARM boss spawns every 1-2s)
-    if (enemies.current.length > 24) {
+    // Prune dead enemies to prevent unbounded array growth.
+    // Survival stages keep visible enemy counts low (≤5) — prune aggressively so dead
+    // entries don't inflate the array and slow per-frame iteration over time.
+    const enemyPruneThreshold = isSurvivalStage(currentStage) ? 10 : 24;
+    if (enemies.current.length > enemyPruneThreshold) {
       enemies.current = enemies.current.filter(e => e.alive);
     }
 
@@ -5174,7 +5277,11 @@ export default function App() {
       if (!stageStartTime.current) stageStartTime.current = Date.now();
       const elapsed = (Date.now() - stageStartTime.current) / 1000;
       const timeLeft = Math.max(0, survivalDuration - Math.floor(elapsed));
-      setSurvivalTime(timeLeft);
+      // Only call setState when the displayed second actually changes (integer value).
+      if (timeLeft !== survivalTimerRef.current) {
+        survivalTimerRef.current = timeLeft;
+        setSurvivalTime(timeLeft);
+      }
 
       if (currentTime - lastProgressUiUpdateAt.current > 120) {
         setStageProgress(Math.min(1, elapsed / survivalDuration));
@@ -5189,14 +5296,11 @@ export default function App() {
       // Keep spawning enemies if visible threats are low.
       // Off-screen looping enemies should not block fresh spawns.
       const maxEnemies = isAsteroidBelt ? (isMobile ? 4 : 5) : currentStage === 3 ? 3 : currentStage === 4 ? 3 : 8;
-      const visibleEnemyCount = enemies.current.filter((e) =>
-        e.alive &&
-        !e.isBoss &&
-        e.x > -80 &&
-        e.x < CANVAS_WIDTH + 80 &&
-        e.y > -120 &&
-        e.y < CANVAS_HEIGHT + 120
-      ).length;
+      let visibleEnemyCount = 0;
+      for (let vi = 0; vi < enemies.current.length; vi++) {
+        const ve = enemies.current[vi];
+        if (ve.alive && !ve.isBoss && ve.x > -80 && ve.x < CANVAS_WIDTH + 80 && ve.y > -120 && ve.y < CANVAS_HEIGHT + 120) visibleEnemyCount++;
+      }
       if (visibleEnemyCount < maxEnemies && !isWarping.current) {
         const x = 40 + Math.random() * (CANVAS_WIDTH - 80);
         const eliteChance = isAsteroidBelt
@@ -5302,12 +5406,13 @@ export default function App() {
 
         // Passive Defense: Collision with enemy bullets
         enemyBullets.current.forEach((eb, ebIdx) => {
+          if (!eb.alive) return;
           if (ebIdx % followerBulletStride !== 0) return;
           const bdx = eb.x - seg.x;
           const bdy = eb.y - seg.y;
           const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
           if (bdist < 15) {
-            eb.y = CANVAS_HEIGHT + 100; // Destroy bullet
+            eb.alive = false; // Destroy bullet
             createExplosion(seg.x, seg.y, '#00ffcc', 5);
             seg.lastHit = Date.now();
           }
@@ -5357,11 +5462,12 @@ export default function App() {
       audio.playWarp();
       flash.current = 0.6; // Warp start flash (reduced intensity)
 
-      // Clear bullets
-      bullets.current = [];
-      enemyBullets.current = [];
+      // Clear bullets and loose entities
+      for (const b of bullets.current) b.alive = false;
+      for (const b of enemyBullets.current) b.alive = false;
       asteroids.current = [];
       obstacles.current = [];
+      for (const s of scraps.current) s.alive = false;
 
       setTimeout(() => {
         flash.current = 1.0; // Final warp flash
@@ -5378,8 +5484,7 @@ export default function App() {
     // Decay effects
     // (Moved to beginning of update loop)
 
-    const currentAliveEnemies = enemies.current.filter(e => e.alive);
-    if (currentAliveEnemies.some(e => e.y + e.height > CANVAS_HEIGHT && e.state === 'IN_FORMATION')) {
+    if (enemies.current.some(e => e.alive && e.y + e.height > CANVAS_HEIGHT && e.state === 'IN_FORMATION')) {
       setGameState('GAME_OVER');
     }
   };
@@ -5403,8 +5508,11 @@ export default function App() {
     const ctx = offscreenCtx.current;
     if (!ctx || !offscreenCanvas.current) return;
 
-    // Clear offscreen
-    ctx.fillStyle = 'rgba(2, 2, 5, 0.3)';
+    // Clear offscreen with a semi-transparent fill to create a motion-blur / trail effect.
+    // Desktop: alpha 0.3 (70% of previous frame survives) — subtle cinematic blur at 60fps.
+    // Mobile: alpha 0.5 (50% survives) — at lower effective FPS the 0.3 value let frames
+    // accumulate visibly, making the game look blurry. 0.5 halves the accumulation time.
+    ctx.fillStyle = isMobile ? 'rgba(2, 2, 5, 0.5)' : 'rgba(2, 2, 5, 0.3)';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
     ctx.save();
@@ -5427,13 +5535,15 @@ export default function App() {
     // Parallax Starfield
     const currentStage = getStageFromWave(waveRef.current);
     const drawNow = Date.now();
+    // Cache shield state once — reused throughout draw() to avoid redundant function calls per frame.
+    const slingshotShieldStateCache = getSlingshotShieldState(drawNow);
     const drawLoadTier = renderLoadTierRef.current;
     const isReducedBossFx = drawLoadTier >= 1;
     const isMinimalBossFx = drawLoadTier >= 2;
     // shadowBlur scale: tier 0 = full, tier 1 = 60%, tier 2 = 0 (off)
     // On mobile tier 0 is already reduced; desktop is unaffected until load rises.
     const shadowScale = isMobile
-      ? (drawLoadTier >= 2 ? 0 : drawLoadTier >= 1 ? 0.5 : 0.7)
+      ? (drawLoadTier >= 2 ? 0 : 0.5)  // tier 0 & 1 both 0.5 on mobile (was 0.7 / 0.5)
       : 1;
     const isChase = currentStage === 4;
     const isFinalFrontStage = currentStage === 5;
@@ -5509,7 +5619,7 @@ export default function App() {
     ctx.lineWidth = 1;
     const gridSpacing = isFinalFrontStage ? (isMobile ? 96 : 56) : (isMobile ? 80 : 40); // Reduce visual density in Final Front
     const gridSpeed = isWarping.current ? 100 : 20;
-    const gridOffset = (Date.now() / gridSpeed) % gridSpacing;
+    const gridOffset = (drawNow / gridSpeed) % gridSpacing;
 
     // Skip grid entirely on mobile under load — low visual impact, non-trivial CPU cost
     if (!isMobile || drawLoadTier === 0) {
@@ -5655,24 +5765,26 @@ export default function App() {
       ctx.restore();
     });
 
-    // Draw Scraps
-    scraps.current.forEach(s => {
-      ctx.save();
-      ctx.translate(s.x, s.y);
-      ctx.shadowBlur = 10 * shadowScale;
-      ctx.shadowColor = '#00ffcc';
+    // Draw Scraps — all share the same color; batch into one path to eliminate per-dot save/restore.
+    if (scraps.current.length > 0) {
+      if (!isMobile) { ctx.shadowBlur = 8; ctx.shadowColor = '#00ffcc'; }
       ctx.fillStyle = '#00ffcc';
       ctx.beginPath();
-      ctx.arc(0, 0, 2, 0, Math.PI * 2);
+      for (let si = 0; si < scraps.current.length; si++) {
+        const s = scraps.current[si];
+        if (!s.alive) continue;
+        ctx.moveTo(s.x + 2, s.y);
+        ctx.arc(s.x, s.y, 2, 0, Math.PI * 2);
+      }
       ctx.fill();
-      ctx.restore();
-    });
+      if (!isMobile) ctx.shadowBlur = 0;
+    }
 
     // Power-ups
     powerUps.current.forEach(p => {
       ctx.save();
       ctx.translate(p.x, p.y);
-      ctx.rotate(Date.now() / 500);
+      ctx.rotate(drawNow / 500);
       const color = p.type === 'MULTISHOT'
         ? '#ffcc00'
         : p.type === 'SHIELD'
@@ -6271,7 +6383,7 @@ export default function App() {
         ctx.restore();
       }
 
-      const slingshotShieldState = getSlingshotShieldState(Date.now());
+      const slingshotShieldState = slingshotShieldStateCache;
       if (slingshotShieldState.active) {
         ctx.save();
         ctx.rotate(slingshotShieldState.angle - playerTilt.current);
@@ -6432,6 +6544,7 @@ export default function App() {
     // Bullets
     ctx.shadowBlur = 15 * shadowScale;
     bullets.current.forEach((b) => {
+      if (!b.alive) return;
       const size = b.size || 4;
       ctx.fillStyle = isOverdriveActiveRef.current ? '#ff3366' : '#00ffcc';
       ctx.shadowColor = isOverdriveActiveRef.current ? '#ff3366' : '#00ffcc';
@@ -6442,6 +6555,7 @@ export default function App() {
     // Enemy Bullets
     ctx.shadowBlur = 10 * shadowScale;
     enemyBullets.current.forEach((b) => {
+      if (!b.alive) return;
       if (b.isBeam) {
         // Beam: elongated bar aligned to velocity direction; white when deflected/bouncing
         const beamColor = b.deflected ? '#ffffff' : '#00ffdd';
@@ -6464,7 +6578,8 @@ export default function App() {
     });
     ctx.shadowBlur = 0;
 
-    // Enemies
+    // Enemies — color array hoisted outside loop to avoid per-enemy allocation.
+    const drawEnemyColors = ['#ffcc00', '#ff33cc', '#33ccff', '#ff0000'];
     enemies.current.forEach((enemy) => {
       if (!enemy.alive) return;
 
@@ -6524,9 +6639,9 @@ export default function App() {
           ctx.arc(0, 0, 40 + pulse, 0, Math.PI * 2);
           ctx.stroke();
 
-          // Rotating Rings
+          // Rotating Rings — skip entirely at tier 2 (ellipse + rotate is expensive on mobile)
           const angleOffset = (drawNow / 1000) * Math.PI;
-          const ringCount = isMinimalBossFx ? 1 : isReducedBossFx ? 1 : 2;
+          const ringCount = isMinimalBossFx ? 0 : isReducedBossFx ? 1 : 2;
           for (let i = 0; i < ringCount; i++) {
             ctx.save();
             ctx.rotate(angleOffset * (i + 1) * 0.5);
@@ -6540,7 +6655,7 @@ export default function App() {
           // Draw Lasers
           if (enemy.phase! >= 1) {
             const angle = (enemy.tractorBeamTimer! / 1000) * Math.PI;
-            const laserCount = isMinimalBossFx ? 2 : enemy.phase === 3 ? 4 : 2;
+            const laserCount = (isMinimalBossFx || isReducedBossFx) ? 2 : enemy.phase === 3 ? 4 : 2;
             ctx.save();
             ctx.lineWidth = (isMinimalBossFx ? 5 : isReducedBossFx ? 6.5 : 8) + Math.sin(drawNow / 50) * (isMinimalBossFx ? 2 : isReducedBossFx ? 3 : 4);
             ctx.strokeStyle = isMinimalBossFx ? 'rgba(0, 255, 255, 0.82)' : isReducedBossFx ? 'rgba(0, 255, 255, 0.9)' : '#00ffff';
@@ -6563,7 +6678,7 @@ export default function App() {
           ctx.fillRect(-enemy.width / 2 + 10, -10, 5, 20);
           ctx.fillRect(enemy.width / 2 - 15, -10, 5, 20);
         }
-        if (enemy.phase! >= 3) {
+        if (enemy.phase! >= 3 && !isMinimalBossFx) {
           ctx.strokeStyle = '#ffffff';
           ctx.beginPath();
           ctx.arc(0, 0, 40, 0, Math.PI * 2);
@@ -6583,7 +6698,7 @@ export default function App() {
 
           ctx.fillStyle = gradient;
           ctx.shadowColor = '#00ffff';
-          ctx.shadowBlur = isCharging ? 5 : 20;
+          ctx.shadowBlur = (isCharging ? 5 : 20) * shadowScale;
           ctx.beginPath();
           ctx.moveTo(-20, enemy.height / 2);
           ctx.lineTo(20, enemy.height / 2);
@@ -6751,8 +6866,7 @@ export default function App() {
       }
       ctx.rotate(angle);
 
-      const colors = ['#ffcc00', '#ff33cc', '#33ccff', '#ff0000'];
-      const color = colors[enemy.type] || '#ffcc00';
+      const color = drawEnemyColors[enemy.type] || '#ffcc00';
 
       ctx.shadowBlur = 15 * shadowScale;
       ctx.shadowColor = color;
@@ -6771,7 +6885,7 @@ export default function App() {
 
         // Core
         ctx.fillStyle = '#ffffff';
-        ctx.globalAlpha = 0.5 + Math.sin(Date.now() / 100) * 0.3;
+        ctx.globalAlpha = 0.5 + Math.sin(drawNow / 100) * 0.3;
         ctx.beginPath();
         ctx.arc(0, 0, 3, 0, Math.PI * 2);
         ctx.fill();
@@ -6842,7 +6956,7 @@ export default function App() {
 
         // Inner Pulse
         ctx.beginPath();
-        ctx.arc(0, 0, 8 + Math.sin(Date.now() / 100) * 4, 0, Math.PI * 2);
+        ctx.arc(0, 0, 8 + Math.sin(drawNow / 100) * 4, 0, Math.PI * 2);
         ctx.stroke();
 
         // Health Bar for Elite
@@ -6859,7 +6973,7 @@ export default function App() {
         const shieldColor = '#33ccff';
         ctx.strokeStyle = shieldColor;
         ctx.shadowColor = shieldColor;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = 10 * shadowScale;
         ctx.lineWidth = 2;
 
         // Body
@@ -6906,7 +7020,7 @@ export default function App() {
       ctx.translate(dx, dy);
       ctx.rotate(drone.angle + Math.PI / 2);
 
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = 10 * shadowScale;
       ctx.shadowColor = '#00ffcc';
       ctx.strokeStyle = '#00ffcc';
       ctx.lineWidth = 2;
@@ -6934,8 +7048,12 @@ export default function App() {
     ctx.restore(); // Restore from shake
 
     // Nebula Pass Effect (boss/late-stage ambience only when trippy is active)
-    const nebulaFrameDivisor = renderLoadTierRef.current === 0 ? 1 : renderLoadTierRef.current === 1 ? 2 : 3;
-    const shouldRenderNebula = Math.floor(Date.now() / 16) % nebulaFrameDivisor === 0;
+    // During boss on mobile tier 1, skip 2-of-3 frames (divisor 3) instead of 1-of-2.
+    // Nebula uses createRadialGradient + screen composite — expensive for 60-frame loops.
+    const nebulaFrameDivisor = renderLoadTierRef.current === 0 ? 1
+      : (renderLoadTierRef.current === 1 && isMobile && waveHasBossRef.current) ? 3
+      : renderLoadTierRef.current === 1 ? 2 : 3;
+    const shouldRenderNebula = Math.floor(drawNow / 16) % nebulaFrameDivisor === 0;
     if (trippyIntensity.current > 0.05 && shouldRenderNebula) {
       ctx.save();
       const time = Date.now() / 2000;
@@ -7168,7 +7286,7 @@ export default function App() {
 
     // Ambush Warning removed
     const isTimeBasedStage = isSurvivalStage(currentStage);
-    const shieldFxActive = getSlingshotShieldState(Date.now()).active;
+    const shieldFxActive = slingshotShieldStateCache.active;
 
     // Final Post-Processing to Main Canvas
     mainCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -7229,26 +7347,36 @@ export default function App() {
       const p95Frame = getPercentile(frameTimeSamplesMs.current, 95);
 
       // Adaptive quality control with hysteresis: reduce expensive full-screen effects only when needed.
+      // Mobile thresholds are tighter: GPU/CPU runs hotter and thermal throttling kicks in earlier.
       const prevTier = renderLoadTierRef.current;
       let nextTier = prevTier;
       const isChaseStage = currentStage === 4;
       const isFinalLaserBossActive = enemies.current.some((enemy) => enemy.alive && enemy.isBoss && enemy.bossType === BossType.LASER);
+      // On mobile: pre-emptively raise to tier 1 the moment any boss is alive,
+      // without waiting for frame-time degradation. Boss shadowBlur and tentacle
+      // rendering are expensive enough that reactive tier changes arrive too late.
+      const isBossActiveForTier = isMobile && waveHasBossRef.current;
 
       // Final Front sector 2 boss gets the earliest downgrade because its beam pass is expensive.
       if (isFinalLaserBossActive) {
-        if (p95Frame > 34) nextTier = 2;
-        else if (p95Frame > 26) nextTier = 1;
-        else if (p95Frame < 20) nextTier = 0;
+        if (p95Frame > (isMobile ? 28 : 34)) nextTier = 2;
+        else if (p95Frame > (isMobile ? 22 : 26)) nextTier = 1;
+        else if (p95Frame < (isMobile ? 18 : 20)) nextTier = 0;
       } else if (isChaseStage) {
-        if (p95Frame > 42) nextTier = 2;
-        else if (p95Frame > 32) nextTier = 1;
-        else if (p95Frame < 24) nextTier = 0;
+        if (p95Frame > (isMobile ? 36 : 42)) nextTier = 2;
+        else if (p95Frame > (isMobile ? 28 : 32)) nextTier = 1;
+        else if (p95Frame < (isMobile ? 20 : 24)) nextTier = 0;
       } else {
-        // Other stages: original thresholds
-        if (p95Frame > 48) nextTier = 2;
-        else if (p95Frame > 36) nextTier = 1;
-        else if (p95Frame < 28) nextTier = 0;
+        // Other stages — mobile escalates at 28ms (tier 1) / 38ms (tier 2) vs desktop 36/48ms
+        if (p95Frame > (isMobile ? 38 : 48)) nextTier = 2;
+        else if (p95Frame > (isMobile ? 28 : 36)) nextTier = 1;
+        else if (p95Frame < (isMobile ? 22 : 28)) nextTier = 0;
       }
+      // Mobile boss floor: never drop below tier 1 while a boss is alive.
+      if (isBossActiveForTier && nextTier < 1) nextTier = 1;
+      // Mobile formation floor: ≥10 alive enemies means 10+ per-enemy shadowBlur draws per frame —
+      // as GPU-expensive as a boss. Pre-raise to tier 1 proactively.
+      if (isMobile && aliveEnemies >= 10 && nextTier < 1) nextTier = 1;
       renderLoadTierRef.current = nextTier;
 
       let nextSimulationTier = simulationLoadTierRef.current;
@@ -7260,6 +7388,9 @@ export default function App() {
       } else if (p95Frame > (isMobile ? 42 : 50)) nextSimulationTier = 2;
       else if (p95Frame > (isMobile ? 33 : 38)) nextSimulationTier = 1;
       else if (p95Frame < (isMobile ? 26 : 28)) nextSimulationTier = 0;
+      // Mobile boss + formation floor for simulation tier as well.
+      if (isBossActiveForTier && nextSimulationTier < 1) nextSimulationTier = 1;
+      if (isMobile && aliveEnemies >= 10 && nextSimulationTier < 1) nextSimulationTier = 1;
       simulationLoadTierRef.current = nextSimulationTier;
 
       setPerfStats({
@@ -7776,16 +7907,25 @@ export default function App() {
       </div>
 
       {/* Footer & Fullscreen */}
-      <div className="mt-2 md:mt-8 text-[9px] text-gray-700 uppercase tracking-[0.5em] flex items-center gap-4">
+      <div className="mt-2 md:mt-8 text-[9px] text-gray-700 uppercase tracking-[0.5em] flex flex-col items-center gap-1">
+        <div className="flex items-center gap-4">
           <span>Arcade Revision 2.5</span>
           <span className="w-1 h-1 bg-gray-800 rounded-full" />
-          <button
-            onClick={toggleFullscreen}
-            className="hover:text-white transition-colors flex items-center gap-1"
-          >
-            <Maximize2 size={10} />
-            <span>{isFullscreen ? "Exit Full" : "Fullscreen"}</span>
-          </button>
+          {!isIOSStandalone && (
+            <button
+              onClick={toggleFullscreen}
+              className="hover:text-white transition-colors flex items-center gap-1"
+            >
+              <Maximize2 size={10} />
+              <span>{isIOS ? 'Fullscreen' : (isFullscreen ? 'Exit Full' : 'Fullscreen')}</span>
+            </button>
+          )}
+        </div>
+        {showIosHint && (
+          <span className="text-[8px] text-gray-600 tracking-normal normal-case text-center">
+            Tap Safari's Share ↑ → "Add to Home Screen" for fullscreen
+          </span>
+        )}
       </div>
     </div>
   );
