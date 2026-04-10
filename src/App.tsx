@@ -957,8 +957,8 @@ export default function App() {
 
   const generateMazeRow = () => {
     const currentStage = getStageFromWave(waveRef.current);
-    // Maze blocks start at Stage 3; Stage 2 is obstacle-free
-    if (currentStage < 3) return;
+    // Stage 1 is obstacle-free (tutorial); Stage 2+ get environmental hazards.
+    if (currentStage < 2) return;
 
     const rowY = -100;
     const blockWidth = CANVAS_WIDTH / 10;
@@ -970,7 +970,9 @@ export default function App() {
     let tentacleChance = 0;
 
     if (currentStage === 2) {
-      // Asteroid Belt: tentacles add R-Type environmental hazard to survival waves.
+      // Asteroid Belt: tentacles only — walls/destructibles would conflict with asteroid system.
+      wallDensity = 0;
+      destructibleDensity = 0;
       tentacleChance = 0.06;
     }
 
