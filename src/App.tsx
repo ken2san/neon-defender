@@ -7501,29 +7501,7 @@ export default function App() {
         {/* CRT Vignette */}
         <div className="absolute inset-0 pointer-events-none z-20 shadow-[inset_0_0_100px_rgba(0,0,0,0.4)]" />
 
-        {/* Debug panel — mobile only; PC uses Alt+1-5 (stage) and G (god mode) */}
-        {debugMode && isMobile && gameState === 'PLAYING' && (
-          <div className="absolute bottom-[5rem] right-2 z-30 flex flex-col gap-1 items-end select-none">
-            <span className="text-[7px] text-yellow-400/50 font-black uppercase tracking-widest">debug</span>
-            <div className="flex gap-1">
-              {([1, 2, 3, 4, 5] as const).map(s => (
-                <button
-                  key={s}
-                  onPointerDown={e => { e.stopPropagation(); waveRef.current = (s - 1) * 2; startNextWave(); }}
-                  className="w-7 h-7 text-[10px] font-black text-yellow-300 bg-yellow-400/20 border border-yellow-400/40 rounded active:scale-90 touch-none"
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-            <button
-              onPointerDown={e => { e.stopPropagation(); const next = !godModeRef.current; godModeRef.current = next; setGodMode(next); if (next) { integrityRef.current = 100; setIntegrity(100); } }}
-              className={`text-[8px] font-black uppercase tracking-wider px-2 py-0.5 rounded border touch-none ${godMode ? 'text-yellow-300 bg-yellow-400/20 border-yellow-400/40' : 'text-white/40 bg-black/40 border-white/10'}`}
-            >
-              GOD {godMode ? 'ON' : 'OFF'}
-            </button>
-          </div>
-        )}
+
 
         {/* Relic Inventory (VS Style) */}
         <div className="absolute top-16 left-4 flex flex-col gap-1 pointer-events-none">
@@ -7567,24 +7545,47 @@ export default function App() {
           ))}
         </div>
 
-        {showDebugOverlay && gameState === 'PLAYING' && (
-          <div className="absolute bottom-4 right-4 pointer-events-none bg-black/65 border border-white/10 rounded overflow-hidden text-[9px] leading-tight font-mono z-30">
-            <div className="px-2 py-1.5 border-b border-[#ffcc00]/20 text-[#ffe9b3]">
+        {debugMode && gameState === 'PLAYING' && (
+          <div className="absolute bottom-4 right-4 bg-black/65 border border-white/10 rounded overflow-hidden text-[9px] leading-tight font-mono z-30 select-none">
+            {/* Stage jump buttons — mobile only (PC: Alt+1-5) */}
+            {isMobile && (
+              <div className="px-2 py-1.5 border-b border-yellow-400/20 flex items-center gap-1">
+                <span className="text-[7px] text-yellow-400/50 uppercase tracking-widest mr-1">stage</span>
+                {([1, 2, 3, 4, 5] as const).map(s => (
+                  <button
+                    key={s}
+                    onPointerDown={e => { e.stopPropagation(); waveRef.current = (s - 1) * 2; startNextWave(); }}
+                    className="w-6 h-6 text-[9px] font-black text-yellow-300 bg-yellow-400/20 border border-yellow-400/40 rounded active:scale-90 touch-none"
+                  >{s}</button>
+                ))}
+              </div>
+            )}
+            {/* Input_Debug */}
+            <div className="px-2 py-1.5 border-b border-[#ffcc00]/20 text-[#ffe9b3] pointer-events-none">
               <div className="text-[8px] text-[#ffcc00] uppercase tracking-widest mb-1">Input_Debug</div>
               <div>Mouse:{isMouseDown.current ? '1' : '0'} Touch:{isTouching.current ? '1' : '0'} Virtual:{isVirtualDragActive.current ? '1' : '0'}</div>
               <div>Sling:{isSlingshotMode.current ? '1' : '0'} Charged:{isSlingshotCharged.current ? '1' : '0'} Armed:{slingshotArmed.current ? '1' : '0'}</div>
               <div>Idle:{Math.max(0, Date.now() - lastInputActivityAt.current)}ms Anchor:{mouseAnchorPos.current ? '1' : '0'}</div>
             </div>
-            <div className="px-2 py-1.5 border-b border-white/5 text-[#bfffee]">
+            {/* Perf_Baseline */}
+            <div className="px-2 py-1.5 border-b border-white/5 text-[#bfffee] pointer-events-none">
               <div className="text-[8px] text-[#00ffcc] uppercase tracking-widest mb-1">Perf_Baseline</div>
               <div>FPS p50 {perfStats.fpsP50.toFixed(1)} | p95 {perfStats.fpsP95.toFixed(1)}</div>
               <div>Frame p50 {perfStats.frameMsP50.toFixed(2)}ms | p95 {perfStats.frameMsP95.toFixed(2)}ms</div>
               <div>Obj E:{perfStats.enemies} PB:{perfStats.bullets} EB:{perfStats.enemyBullets} P:{perfStats.particles}</div>
             </div>
-            <div className="px-2 py-1 flex items-center gap-2">
-              <span className="text-[7px] text-yellow-400/40 uppercase tracking-widest">GOD</span>
-              <span className={`text-[8px] font-black ${godMode ? 'text-yellow-300' : 'text-white/20'}`}>{godMode ? 'ON' : 'OFF'}</span>
-            </div>
+            {/* GOD toggle (interactive on mobile, indicator on PC) */}
+            {isMobile ? (
+              <button
+                onPointerDown={e => { e.stopPropagation(); const next = !godModeRef.current; godModeRef.current = next; setGodMode(next); if (next) { integrityRef.current = 100; setIntegrity(100); } }}
+                className={`w-full px-2 py-1 text-left text-[8px] font-black uppercase tracking-wider touch-none ${godMode ? 'text-yellow-300 bg-yellow-400/10' : 'text-white/30'}`}
+              >GOD {godMode ? 'ON' : 'OFF'}</button>
+            ) : (
+              <div className="px-2 py-1 flex items-center gap-2 pointer-events-none">
+                <span className="text-[7px] text-yellow-400/40 uppercase tracking-widest">GOD</span>
+                <span className={`text-[8px] font-black ${godMode ? 'text-yellow-300' : 'text-white/20'}`}>{godMode ? 'ON' : 'OFF'}</span>
+              </div>
+            )}
           </div>
         )}
 
