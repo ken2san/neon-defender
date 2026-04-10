@@ -7501,9 +7501,9 @@ export default function App() {
         {/* CRT Vignette */}
         <div className="absolute inset-0 pointer-events-none z-20 shadow-[inset_0_0_100px_rgba(0,0,0,0.4)]" />
 
-        {/* Debug status badge — PC only, shows active debug flags */}
+        {/* Debug status badge — PC only, floats above Input_Debug */}
         {debugMode && !isMobile && gameState === 'PLAYING' && (
-          <div className="absolute bottom-2 right-2 z-30 pointer-events-none flex flex-col items-end gap-0.5">
+          <div className="absolute bottom-[13.5rem] right-4 z-30 pointer-events-none flex items-center gap-1.5">
             <span className="text-[7px] text-yellow-400/40 font-black uppercase tracking-widest">debug</span>
             {godMode && <span className="text-[8px] font-black text-yellow-300 bg-yellow-400/15 border border-yellow-400/30 px-1.5 py-px rounded">★ GOD</span>}
           </div>
