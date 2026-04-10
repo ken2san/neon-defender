@@ -892,8 +892,10 @@ export default function App() {
   };
 
   const triggerRelicSelection = () => {
-    // Pick 4 random (increased choice since it's rarer)
-    setUpgradeOptions(pickRandomOptions(RELIC_OPTIONS, 4));
+    // Exclude already-owned relics; fall back to full pool if exhausted.
+    const ownedIds = new Set(relicsRef.current.map(r => r.id));
+    const available = RELIC_OPTIONS.filter(r => !ownedIds.has(r.id));
+    setUpgradeOptions(pickRandomOptions(available.length > 0 ? available : RELIC_OPTIONS, 4));
     setShowUpgrade(true);
     setGameState('RELIC_SELECT');
     pauseStartTime.current = Date.now();
@@ -965,10 +967,15 @@ export default function App() {
     // Density increases with stage and wave
     let wallDensity = 0.02;
     let destructibleDensity = 0.05;
-    let tentacleChance = 0; // Stage 2: no tentacles — keep difficulty manageable
+    let tentacleChance = 0;
+
+    if (currentStage === 2) {
+      // Asteroid Belt: tentacles add R-Type environmental hazard to survival waves.
+      tentacleChance = 0.06;
+    }
 
     if (currentStage === 3) {
-      // Stage 3 "Heavy Fire": structured turret/windmill formations on indestructible walls.
+      // Stage 3 "Turret Run": structured turret/windmill formations on indestructible walls.
       // No destructibles — difficulty comes from navigating formations + turret fire.
       type Slot = null | 'WALL' | 'TURRET_BLOCK' | 'WINDMILL';
       // Windmill (armLen=290px) is always centred on the canvas. The blade sweep covers

@@ -51,7 +51,7 @@ describe('stage helpers', () => {
     expect(STAGE_NAMES).toEqual([
       'Tutorial',
       'Asteroid Belt',
-      'Heavy Fire',
+      'Turret Run',
       'Chase',
       'Final Front',
     ]);

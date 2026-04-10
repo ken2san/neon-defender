@@ -1,4 +1,4 @@
-export const STAGE_NAMES = ['Tutorial', 'Asteroid Belt', 'Heavy Fire', 'Chase', 'Final Front'] as const;
+export const STAGE_NAMES = ['Tutorial', 'Asteroid Belt', 'Turret Run', 'Chase', 'Final Front'] as const;
 
 export const getStageFromWave = (wave: number): number => {
   return Math.min(5, Math.ceil(wave / 2));
