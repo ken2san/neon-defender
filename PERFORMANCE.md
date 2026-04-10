@@ -10,7 +10,7 @@ _Last updated: 2026-04-10 (session 6)_
 ## Current State
 
 **Branch**: `main`
-**Last commit**: `7f8488e` — fix: LASER boss float uses (sin+1)*25 — eliminates entry-code conflict causing upward stutter
+**Last commit**: `7f8488e` — fix: LASER boss float uses (sin+1)\*25 — eliminates entry-code conflict causing upward stutter
 **Build**: passing (TSC clean, Vite build OK)
 **Firebase**: deployed and live — version "Arcade Revision 2.6"
 

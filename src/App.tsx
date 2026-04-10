@@ -7819,7 +7819,7 @@ export default function App() {
 
         {debugMode && gameState === 'PLAYING' && (
           <div className="absolute bottom-4 right-4 bg-black/65 border border-white/10 rounded overflow-hidden text-[9px] leading-tight font-mono z-30 select-none">
-            {/* Stage jump buttons — mobile only (PC: Alt+1-5) */}
+            {/* Stage jump buttons — mobile only (PC: Alt+1-5, Alt+6) */}
             {isMobile && (
               <div className="px-2 py-1.5 border-b border-yellow-400/20 flex items-center gap-1">
                 <span className="text-[7px] text-yellow-400/50 uppercase tracking-widest mr-1">stage</span>
@@ -7830,6 +7830,26 @@ export default function App() {
                     className="w-6 h-6 text-[9px] font-black text-yellow-300 bg-yellow-400/20 border border-yellow-400/40 rounded active:scale-90 touch-none"
                   >{s}</button>
                 ))}
+                <button
+                  onPointerDown={e => {
+                    e.stopPropagation();
+                    audio.stopBGM();
+                    victoryPendingRef.current = true;
+                    setBossHealth(null);
+                    for (const b of bullets.current) b.alive = false;
+                    for (const b of enemyBullets.current) b.alive = false;
+                    setVictoryStats({
+                      survivalMs: Date.now() - gameSessionStartRef.current,
+                      shotsFired: shotsFiredRef.current,
+                      shotsHit: shotsHitRef.current,
+                      hitsTaken: hitsTakenRef.current,
+                      maxCombo: maxComboRef.current,
+                      grazes: grazeCount.current,
+                    });
+                    setGameState('VICTORY');
+                  }}
+                  className="w-6 h-6 text-[9px] font-black text-[#00ffcc] bg-[#00ffcc]/20 border border-[#00ffcc]/40 rounded active:scale-90 touch-none"
+                >E</button>
               </div>
             )}
             {/* Input_Debug */}
@@ -8443,7 +8463,7 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.7 }}
-              className="absolute inset-0 flex flex-col items-center justify-center z-50 overflow-y-auto py-6"
+              className="absolute inset-0 flex flex-col items-center justify-center z-50 overflow-hidden"
               style={{ background: 'radial-gradient(ellipse at 50% 20%, rgba(255,51,102,0.08) 0%, rgba(0,0,0,0.97) 65%)' }}
             >
               {/* Scanlines */}
@@ -8451,11 +8471,11 @@ export default function App() {
                 background: 'repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.15) 3px, rgba(0,0,0,0.15) 4px)'
               }} />
 
-              <div className="relative z-10 flex flex-col items-center w-full max-w-sm px-6 text-center">
+              <div className="relative z-10 flex flex-col items-center w-full max-w-sm px-5 text-center">
 
                 {/* Header */}
-                <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
-                  className="text-[10px] tracking-[0.5em] text-[#ff3366]/40 uppercase mb-4 font-bold">
+                <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+                  className="text-[9px] tracking-[0.5em] text-[#ff3366]/35 uppercase mb-2 font-bold">
                   NEON DEFENDER
                 </motion.div>
 
@@ -8464,113 +8484,110 @@ export default function App() {
                   initial={{ opacity: 0, scale: 1.3 }}
                   animate={{ opacity: 1, scale: 1, textShadow: ['0 0 20px #ff3366', '0 0 50px #ff3366', '0 0 20px #ff3366'] }}
                   transition={{ delay: 0.2, duration: 2.5, repeat: Infinity, scale: { duration: 0.4 } }}
-                  className="text-4xl font-black text-[#ff3366] tracking-[0.15em] mb-1"
+                  className="text-3xl font-black text-[#ff3366] tracking-[0.15em] mb-0.5"
                 >
                   MISSION FAILED
                 </motion.div>
 
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}
-                  className="text-xs text-white/25 tracking-[0.2em] uppercase mb-5">
+                  className="text-[9px] text-white/25 tracking-[0.15em] uppercase mb-3">
                   Hull integrity lost — sector abandoned
                 </motion.div>
 
                 {/* Condition panel */}
                 <motion.div
-                  initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 }}
-                  className="w-full rounded-xl p-4 mb-4 text-left"
+                  initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 }}
+                  className="w-full rounded-xl px-4 py-3 mb-3 text-left"
                   style={{ border: `1px solid ${condition.color}44`, background: `${condition.color}0d` }}
                 >
-                  <div className="text-[9px] tracking-[0.4em] uppercase mb-1" style={{ color: condition.color, opacity: 0.6 }}>
-                    TODAY'S CONDITION
-                  </div>
-                  <div className="text-xl font-black tracking-wider mb-1" style={{ color: condition.color, textShadow: `0 0 20px ${condition.color}88` }}>
-                    {condition.label}
-                  </div>
-                  <div className="text-[11px] text-white/40 leading-relaxed">
-                    {condition.detail}
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-[8px] tracking-[0.4em] uppercase mb-0.5" style={{ color: condition.color, opacity: 0.6 }}>
+                        TODAY'S CONDITION
+                      </div>
+                      <div className="text-lg font-black tracking-wider" style={{ color: condition.color, textShadow: `0 0 16px ${condition.color}88` }}>
+                        {condition.label}
+                      </div>
+                    </div>
+                    <div className="text-[9px] text-white/30 leading-relaxed text-right max-w-32.5 mt-1">
+                      {condition.detail}
+                    </div>
                   </div>
                 </motion.div>
 
-                {/* Stats grid */}
-                <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.9 }}
-                  className="w-full rounded-xl overflow-hidden mb-4"
+                {/* Stats panel */}
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.9 }}
+                  className="w-full rounded-xl overflow-hidden mb-3"
                   style={{ border: '1px solid rgba(255,51,102,0.15)', background: 'rgba(255,255,255,0.03)' }}
                 >
                   {/* Score row */}
-                  <div className="flex justify-between items-center px-4 pt-4 pb-2">
-                    <span className="text-[10px] tracking-[0.3em] uppercase text-white/35">Score</span>
-                    <span className="text-2xl font-black font-mono text-white">{score.toLocaleString()}</span>
-                  </div>
-                  <div className="mx-4 border-t border-white/5 mb-3" />
-
-                  {/* Stat rows */}
-                  {[
-                    {
-                      label: 'Survival Time',
-                      value: survivalStr,
-                      bar: null,
-                      note: survivalSec >= 120 ? 'Long run' : survivalSec >= 60 ? 'Decent run' : 'Short session',
-                      color: '#9977ff',
-                    },
-                    {
-                      label: 'Aim Accuracy',
-                      value: accuracy !== null ? `${accuracy}%` : '—',
-                      bar: accuracy !== null ? <StatBar value={accuracy} max={100} color={accuracy >= 68 ? '#00ffcc' : accuracy >= 45 ? '#ff8800' : '#ff3366'} /> : null,
-                      note: accuracy === null ? '' : accuracy >= 68 ? 'Sharp' : accuracy >= 45 ? 'Average' : 'Needs work',
-                      color: accuracy !== null && accuracy >= 68 ? '#00ffcc' : accuracy !== null && accuracy >= 45 ? '#ff8800' : '#ff3366',
-                    },
-                    {
-                      label: 'Shots Fired',
-                      value: s ? String(s.shotsFired) : '—',
-                      bar: s ? <StatBar value={Math.min(s.shotsFired, 300)} max={300} color='#88aaff' /> : null,
-                      note: !s ? '' : s.shotsFired >= 200 ? 'Trigger happy' : s.shotsFired >= 80 ? 'Active' : 'Conservative',
-                      color: '#88aaff',
-                    },
-                    {
-                      label: 'Peak Combo',
-                      value: s ? `×${s.maxCombo}` : '—',
-                      bar: s ? <StatBar value={s.maxCombo} max={15} color='#ffcc00' /> : null,
-                      note: !s ? '' : s.maxCombo >= 10 ? 'On fire!' : s.maxCombo >= 5 ? 'Good rhythm' : 'Keep chaining',
-                      color: '#ffcc00',
-                    },
-                    {
-                      label: 'Grazes',
-                      value: s ? String(s.grazes) : '—',
-                      bar: s ? <StatBar value={s.grazes} max={20} color='#66aaff' /> : null,
-                      note: !s ? '' : s.grazes >= 10 ? 'Razor instincts' : s.grazes >= 4 ? 'Good dodging' : 'Play closer to the edge',
-                      color: '#66aaff',
-                    },
-                    {
-                      label: 'Sectors Reached',
-                      value: s ? `${s.sectorsReached} / 10` : '—',
-                      bar: s ? <StatBar value={s.sectorsReached} max={10} color='#9977ff' /> : null,
-                      note: !s ? '' : s.sectorsReached >= 8 ? 'Nearly there!' : s.sectorsReached >= 5 ? 'Halfway' : 'Push further',
-                      color: '#9977ff',
-                    },
-                  ].map(({ label, value, bar, note, color }) => (
-                    <div key={label} className="px-4 pb-3">
-                      <div className="flex justify-between items-baseline">
-                        <span className="text-[10px] tracking-[0.25em] uppercase text-white/35">{label}</span>
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-[9px] text-white/20">{note}</span>
-                          <span className="text-base font-black font-mono" style={{ color }}>{value}</span>
-                        </div>
-                      </div>
-                      {bar}
+                  <div className="flex justify-between items-end px-4 pt-3 pb-2">
+                    <div className="text-left">
+                      <div className="text-[8px] tracking-[0.3em] uppercase text-white/30">Score</div>
+                      <div className="text-xl font-black font-mono text-white">{score.toLocaleString()}</div>
                     </div>
-                  ))}
+                    <div className="text-right">
+                      <div className="text-[8px] tracking-[0.3em] uppercase text-white/20">Sectors</div>
+                      <div className="text-xl font-black text-white">{s ? `${s.sectorsReached} / 10` : '—'}</div>
+                    </div>
+                  </div>
+                  <div className="mx-4 border-t border-white/5 mb-1" />
+
+                  {/* 2-col stat grid */}
+                  <div className="grid grid-cols-2 gap-x-3 px-4 pb-3">
+                    {[
+                      {
+                        label: 'Survival Time',
+                        value: survivalStr,
+                        color: '#9977ff',
+                        bar: null,
+                      },
+                      {
+                        label: 'Accuracy',
+                        value: accuracy !== null ? `${accuracy}%` : '—',
+                        color: accuracy !== null && accuracy >= 68 ? '#00ffcc' : accuracy !== null && accuracy >= 45 ? '#ff8800' : '#ff3366',
+                        bar: accuracy !== null ? <StatBar value={accuracy} max={100} color={accuracy >= 68 ? '#00ffcc' : accuracy >= 45 ? '#ff8800' : '#ff3366'} /> : null,
+                      },
+                      {
+                        label: 'Shots Fired',
+                        value: s ? String(s.shotsFired) : '—',
+                        color: '#88aaff',
+                        bar: s ? <StatBar value={Math.min(s.shotsFired, 300)} max={300} color='#88aaff' /> : null,
+                      },
+                      {
+                        label: 'Peak Combo',
+                        value: s ? `×${s.maxCombo}` : '—',
+                        color: '#ffcc00',
+                        bar: s ? <StatBar value={s.maxCombo} max={15} color='#ffcc00' /> : null,
+                      },
+                      {
+                        label: 'Grazes',
+                        value: s ? String(s.grazes) : '—',
+                        color: '#66aaff',
+                        bar: s ? <StatBar value={s.grazes} max={20} color='#66aaff' /> : null,
+                      },
+                    ].map(({ label, value, color, bar }) => (
+                      <div key={label} className="pt-2">
+                        <div className="flex justify-between items-baseline">
+                          <span className="text-[8px] tracking-[0.2em] uppercase text-white/25">{label}</span>
+                          <span className="text-xs font-black font-mono" style={{ color }}>{value}</span>
+                        </div>
+                        {bar ?? <div className="w-full h-1 rounded-full mt-1" style={{ background: 'rgba(255,255,255,0.05)' }} />}
+                      </div>
+                    ))}
+                  </div>
                 </motion.div>
 
                 {/* Re-engage button */}
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.5 }}>
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.3 }}>
                   <button
                     onClick={startGame}
-                    className="flex items-center gap-3 px-10 py-3 font-black text-base tracking-[0.25em] uppercase transition-all duration-300"
+                    className="flex items-center gap-3 px-10 py-2.5 font-black text-sm tracking-[0.25em] uppercase transition-all duration-300"
                     style={{ border: '2px solid #00ffcc', color: '#00ffcc', background: 'transparent', boxShadow: '0 0 20px rgba(0,255,204,0.15)' }}
                     onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#00ffcc'; (e.currentTarget as HTMLButtonElement).style.color = '#000'; }}
                     onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = '#00ffcc'; }}
                   >
-                    <RotateCcw size={18} /> Re-Engage
+                    <RotateCcw size={16} /> Re-Engage
                   </button>
                 </motion.div>
 
