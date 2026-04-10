@@ -1,6 +1,6 @@
 # NEON DEFENDER — Performance Notes
 
-_Last updated: 2026-04-09 (session 5)_
+_Last updated: 2026-04-10 (session 6)_
 
 > **Usage**: Update "Current State" at the end of each session so the next session
 > can start here instead of reading conversation history.
@@ -9,31 +9,33 @@ _Last updated: 2026-04-09 (session 5)_
 
 ## Current State
 
-**Branch**: `perf/speed-polish-2`
-**Last commit**: `40f97fa` — perf: boss sim gating — cap laser collision to 2 beams at tier>=1, fix SWARM filter GC
+**Branch**: `main`
+**Last commit**: `7f8488e` — fix: LASER boss float uses (sin+1)*25 — eliminates entry-code conflict causing upward stutter
 **Build**: passing (TSC clean, Vite build OK)
-**Firebase**: deployed and live
+**Firebase**: deployed and live — version "Arcade Revision 2.6"
 
-**Verified fixed** (tested on device):
+**Verified fixed**:
 
 - Stage 2 entry slowdown ✅
 - Stage 2-2 entry jolt ✅
 - BGM gradual slowdown ✅
 - Graze slow-motion stuck at 0.8× permanently ✅
 - Wingman top-left spawn ✅
+- Wingman ghost render (stale closure) ✅
+- Wingman share fire timer with player ✅
 - Tutorial Stage blur / motion accumulation: improved ✅
-- Boss fight heavy: partially improved (3 render gaps closed); still the heaviest point
 - Object pooling: zero heap alloc per bullet/scrap spawn ✅
-- Scrap rendering artifact (cyan polygon): fixed ✅
-- iOS Home Screen shortcut serving stale JS: fixed ✅
+- Scrap rendering artifact (cyan polygon) ✅
+- iOS Home Screen shortcut serving stale JS ✅
+- Level-up screen shown before Mission Clear (boss wave) ✅
+- Laser beam stop-start stutter (all causes eliminated) ✅
+- Orbital ring 1.5-rotation visual snap ✅
+- LASER boss upward stutter ✅
+- **Overall smoothness: confirmed smooth on Mac (session 6)** ✅
 
-**Overall**: significant performance improvement confirmed on device. Boss fight is slightly slow; all other stages acceptable.
+**Open issues / known bugs**: none currently known
 
-**Open issues / known bugs**:
-
-- Boss fight still slightly heavy on mobile (laser phase 3 full-canvas strokes remain the likely bottleneck)
-
-**Next task**: Measure boss fight frame time on device before adding more fixes
+**Next task**: Mobile verification when available
 
 ---
 
