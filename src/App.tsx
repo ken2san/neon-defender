@@ -8149,7 +8149,7 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.8 }}
-              className="absolute inset-0 flex flex-col items-center z-50 text-center overflow-y-auto"
+              className="absolute inset-0 flex flex-col items-center justify-center z-50 text-center overflow-hidden"
               style={{ background: 'radial-gradient(ellipse at 50% 30%, rgba(0,255,204,0.07) 0%, rgba(0,0,0,0.96) 70%)' }}
             >
               {/* Scanlines overlay */}
@@ -8168,62 +8168,75 @@ export default function App() {
                 aria-hidden="true"
               />
 
-              {/* Content */}
-              <div className="relative z-20 flex flex-col items-center w-full max-w-md px-6 py-8 my-auto">
+              {/* Content — compact single screen */}
+              <div className="relative z-20 flex flex-col items-center w-full max-w-sm px-5">
 
                 {/* Game title */}
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.1, duration: 1 }}
-                  className="text-xs tracking-[0.5em] text-[#00ffcc]/30 uppercase mb-6 font-bold"
+                  className="text-[9px] tracking-[0.5em] text-[#00ffcc]/25 uppercase mb-2 font-bold"
                 >
                   NEON DEFENDER
                 </motion.div>
 
-                {/* Trophy with light beams */}
-                <motion.div
-                  initial={{ scale: 0, rotate: -45, opacity: 0 }}
-                  animate={{ scale: 1, rotate: 0, opacity: 1 }}
-                  transition={{ type: 'spring', stiffness: 220, damping: 12, delay: 0.25 }}
-                  className="relative flex items-center justify-center mb-4"
-                  style={{ width: '96px', height: '96px' }}
-                >
-                  {/* Rotating light beams — behind trophy, contained to its own layer */}
+                {/* Trophy + Rank — side by side */}
+                <div className="flex items-center justify-center gap-6 mb-2">
                   <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
-                    className="absolute inset-0 pointer-events-none"
-                    aria-hidden="true"
-                    style={{
-                      background: 'conic-gradient(transparent 0deg, rgba(255,204,0,0.22) 20deg, transparent 40deg, transparent 180deg, rgba(255,204,0,0.15) 200deg, transparent 220deg)',
-                      borderRadius: '50%',
-                    }}
-                  />
-                  <Trophy size={52} className="relative z-10 drop-shadow-[0_0_30px_rgba(255,204,0,0.9)]" style={{ color: '#ffcc00' }} />
-                </motion.div>
+                    initial={{ scale: 0, rotate: -45, opacity: 0 }}
+                    animate={{ scale: 1, rotate: 0, opacity: 1 }}
+                    transition={{ type: 'spring', stiffness: 220, damping: 12, delay: 0.25 }}
+                    className="relative flex items-center justify-center shrink-0"
+                    style={{ width: '72px', height: '72px' }}
+                  >
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
+                      className="absolute inset-0 pointer-events-none"
+                      aria-hidden="true"
+                      style={{
+                        background: 'conic-gradient(transparent 0deg, rgba(255,204,0,0.22) 20deg, transparent 40deg, transparent 180deg, rgba(255,204,0,0.15) 200deg, transparent 220deg)',
+                        borderRadius: '50%',
+                      }}
+                    />
+                    <Trophy size={40} className="relative z-10 drop-shadow-[0_0_24px_rgba(255,204,0,0.9)]" style={{ color: '#ffcc00' }} />
+                  </motion.div>
+
+                  <motion.div
+                    initial={{ opacity: 0, scale: 1.6 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 1.3, duration: 0.55, type: 'spring', stiffness: 260, damping: 16 }}
+                    className="flex flex-col items-center"
+                  >
+                    <div className="text-[9px] tracking-[0.4em] uppercase" style={{ color: vRank.color, opacity: 0.6 }}>RANK</div>
+                    <div className="text-6xl font-black leading-none" style={{ color: vRank.color, textShadow: vRank.shadow }}>
+                      {vRank.rank}
+                    </div>
+                    <div className="text-[9px] tracking-[0.3em] uppercase" style={{ color: vRank.color, opacity: 0.5 }}>{vRank.label}</div>
+                  </motion.div>
+                </div>
 
                 {/* CONGRATULATIONS */}
                 <motion.div
                   initial={{ opacity: 0, letterSpacing: '0.05em' }}
-                  animate={{ opacity: 1, letterSpacing: '0.3em' }}
+                  animate={{ opacity: 1, letterSpacing: '0.25em' }}
                   transition={{ delay: 0.6, duration: 0.7 }}
-                  className="text-sm font-black text-[#ffcc00] uppercase mb-1"
-                  style={{ textShadow: '0 0 20px rgba(255,204,0,0.6)' }}
+                  className="text-[11px] font-black text-[#ffcc00] uppercase mb-0.5"
+                  style={{ textShadow: '0 0 16px rgba(255,204,0,0.6)' }}
                 >
                   ✦ Congratulations ✦
                 </motion.div>
 
                 {/* MISSION COMPLETE */}
                 <motion.div
-                  initial={{ opacity: 0, y: 12 }}
+                  initial={{ opacity: 0, y: 8 }}
                   animate={{
-                    opacity: 1,
-                    y: 0,
+                    opacity: 1, y: 0,
                     textShadow: ['0 0 15px #00ffcc', '0 0 50px #00ffcc, 0 0 80px rgba(0,255,204,0.4)', '0 0 15px #00ffcc'],
                   }}
-                  transition={{ delay: 0.85, duration: 2.4, repeat: Infinity, y: { duration: 0.5, repeat: 0 } }}
-                  className="text-4xl font-black text-[#00ffcc] tracking-[0.2em] mb-1 leading-tight"
+                  transition={{ delay: 0.85, duration: 2.4, repeat: Infinity, y: { duration: 0.4, repeat: 0 } }}
+                  className="text-3xl font-black text-[#00ffcc] tracking-[0.15em] mb-0.5 leading-tight"
                 >
                   MISSION COMPLETE
                 </motion.div>
@@ -8233,132 +8246,111 @@ export default function App() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 1.15, duration: 0.8 }}
-                  className="text-xs text-white/35 tracking-[0.2em] uppercase mb-6"
+                  className="text-[9px] text-white/30 tracking-[0.15em] uppercase mb-3"
                 >
                   The Core has been neutralized. The galaxy is safe.
                 </motion.div>
 
-                {/* Rank display */}
-                <motion.div
-                  initial={{ opacity: 0, scale: 1.6 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 1.3, duration: 0.55, type: 'spring', stiffness: 260, damping: 16 }}
-                  className="flex flex-col items-center mb-5"
-                >
-                  <div className="text-[10px] tracking-[0.4em] uppercase mb-1" style={{ color: vRank.color, opacity: 0.7 }}>
-                    RANK
-                  </div>
-                  <div
-                    className="text-7xl font-black leading-none"
-                    style={{ color: vRank.color, textShadow: vRank.shadow, fontVariantNumeric: 'tabular-nums' }}
-                  >
-                    {vRank.rank}
-                  </div>
-                  <div className="text-[10px] tracking-[0.35em] uppercase mt-1" style={{ color: vRank.color, opacity: 0.55 }}>
-                    {vRank.label}
-                  </div>
-                </motion.div>
-
                 {/* Stats panel */}
                 <motion.div
-                  initial={{ opacity: 0, y: 18 }}
+                  initial={{ opacity: 0, y: 14 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 1.6, duration: 0.5 }}
-                  className="w-full mb-6 rounded-xl overflow-hidden"
+                  className="w-full mb-3 rounded-xl overflow-hidden"
                   style={{ border: '1px solid rgba(0,255,204,0.2)', background: 'rgba(0,255,204,0.04)' }}
                 >
-                  {/* Score row */}
-                  <div className="flex justify-between items-center px-5 pt-4 pb-2">
-                    <span className="text-[10px] tracking-[0.35em] uppercase text-[#00ffcc]/50">Final Score</span>
-                    <span className="text-2xl font-black font-mono text-white" style={{ textShadow: '0 0 10px rgba(255,255,255,0.3)' }}>
-                      {victoryDisplayScore.toLocaleString()}
-                    </span>
-                  </div>
-                  {isNewBest && (
-                    <motion.div
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: [1, 0.5, 1], x: 0 }}
-                      transition={{ delay: 1.8, duration: 1.2, repeat: Infinity }}
-                      className="px-5 pb-1 text-left text-[11px] font-black tracking-[0.25em] text-[#ffcc00]"
-                    >
-                      ★ NEW BEST SCORE
-                    </motion.div>
-                  )}
-                  <div className="flex justify-between items-center px-5 pb-2">
-                    <span className="text-[10px] tracking-[0.35em] uppercase text-[#00ffcc]/35">Best</span>
-                    <span className="text-sm font-bold font-mono text-white/35">{highScore.toLocaleString()}</span>
-                  </div>
-                  <div className="mx-5 border-t border-[#00ffcc]/10" />
-                  <div className="flex justify-between items-center px-5 py-3">
-                    <span className="text-[10px] tracking-[0.35em] uppercase text-[#00ffcc]/50">Sectors Cleared</span>
-                    <span className="text-xl font-black text-white">{waveRef.current} / 10</span>
+                  {/* Score + Sectors row */}
+                  <div className="flex justify-between items-end px-4 pt-3 pb-2">
+                    <div className="text-left">
+                      <div className="text-[8px] tracking-[0.3em] uppercase text-[#00ffcc]/40">Final Score</div>
+                      <div className="text-xl font-black font-mono text-white" style={{ textShadow: '0 0 10px rgba(255,255,255,0.3)' }}>
+                        {victoryDisplayScore.toLocaleString()}
+                      </div>
+                      {isNewBest && (
+                        <motion.div
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: [1, 0.5, 1] }}
+                          transition={{ delay: 1.8, duration: 1.2, repeat: Infinity }}
+                          className="text-[9px] font-black tracking-[0.2em] text-[#ffcc00]"
+                        >
+                          ★ NEW BEST
+                        </motion.div>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[8px] tracking-[0.3em] uppercase text-[#00ffcc]/30">Sectors</div>
+                      <div className="text-xl font-black text-white">{waveRef.current} / 10</div>
+                    </div>
                   </div>
 
                   {/* Pilot assessment */}
-                  <div className="mx-5 border-t border-[#00ffcc]/10" />
-                  <div className="px-5 py-3 text-left">
-                    <div className="text-[9px] tracking-[0.4em] uppercase text-[#00ffcc]/35 mb-1">Pilot Assessment</div>
-                    <div className="text-base font-black tracking-wider text-[#00ffcc]" style={{ textShadow: '0 0 15px rgba(0,255,204,0.5)' }}>
-                      {vAssessment.label}
+                  <div className="mx-4 border-t border-[#00ffcc]/10 mb-2" />
+                  <div className="px-4 pb-2 flex items-start justify-between gap-2">
+                    <div className="text-left">
+                      <div className="text-[8px] tracking-[0.3em] uppercase text-[#00ffcc]/30 mb-0.5">Pilot Assessment</div>
+                      <div className="text-sm font-black tracking-wider text-[#00ffcc]" style={{ textShadow: '0 0 12px rgba(0,255,204,0.5)' }}>
+                        {vAssessment.label}
+                      </div>
                     </div>
-                    <div className="text-[10px] text-white/30 mt-0.5 leading-relaxed">{vAssessment.detail}</div>
+                    <div className="text-[9px] text-white/25 max-w-32 text-right leading-relaxed mt-3">{vAssessment.detail}</div>
                   </div>
 
-                  {/* Per-stat rows */}
-                  <div className="mx-5 border-t border-[#00ffcc]/10 mb-2" />
-                  {[
-                    {
-                      label: 'Aim Accuracy',
-                      value: vAccuracy !== null ? `${vAccuracy}%` : '—',
-                      bar: vAccuracy !== null ? <VStatBar value={vAccuracy} max={100} color={vAccuracy >= 70 ? '#00ffcc' : vAccuracy >= 45 ? '#ff8800' : '#ff3366'} /> : null,
-                    },
-                    {
-                      label: 'Hull Integrity',
-                      value: vs ? `${5 - vs.hitsTaken} / 5` : '—',
-                      bar: vs ? <VStatBar value={5 - vs.hitsTaken} max={5} color={vs.hitsTaken === 0 ? '#00ffcc' : vs.hitsTaken <= 2 ? '#ff8800' : '#ff3366'} /> : null,
-                    },
-                    {
-                      label: 'Clear Time',
-                      value: vCompletionStr,
-                      bar: null,
-                    },
-                    {
-                      label: 'Peak Combo',
-                      value: vs ? `×${vs.maxCombo}` : '—',
-                      bar: vs ? <VStatBar value={vs.maxCombo} max={15} color='#ffcc00' /> : null,
-                    },
-                    {
-                      label: 'Grazes',
-                      value: vs ? String(vs.grazes) : '—',
-                      bar: vs ? <VStatBar value={vs.grazes} max={20} color='#66aaff' /> : null,
-                    },
-                  ].map(({ label, value, bar }) => (
-                    <div key={label} className="px-5 pb-2">
-                      <div className="flex justify-between items-baseline">
-                        <span className="text-[10px] tracking-[0.25em] uppercase text-white/30">{label}</span>
-                        <span className="text-sm font-black font-mono text-white/60">{value}</span>
+                  {/* 2-column stat grid */}
+                  <div className="mx-4 border-t border-[#00ffcc]/10 mb-1" />
+                  <div className="grid grid-cols-2 gap-x-4 px-4 pb-3">
+                    {[
+                      {
+                        label: 'Accuracy',
+                        value: vAccuracy !== null ? `${vAccuracy}%` : '—',
+                        bar: vAccuracy !== null ? <VStatBar value={vAccuracy} max={100} color={vAccuracy >= 70 ? '#00ffcc' : vAccuracy >= 45 ? '#ff8800' : '#ff3366'} /> : null,
+                      },
+                      {
+                        label: 'Hull',
+                        value: vs ? `${5 - vs.hitsTaken} / 5` : '—',
+                        bar: vs ? <VStatBar value={5 - vs.hitsTaken} max={5} color={vs.hitsTaken === 0 ? '#00ffcc' : vs.hitsTaken <= 2 ? '#ff8800' : '#ff3366'} /> : null,
+                      },
+                      {
+                        label: 'Clear Time',
+                        value: vCompletionStr,
+                        bar: null,
+                      },
+                      {
+                        label: 'Peak Combo',
+                        value: vs ? `×${vs.maxCombo}` : '—',
+                        bar: vs ? <VStatBar value={vs.maxCombo} max={15} color='#ffcc00' /> : null,
+                      },
+                      {
+                        label: 'Grazes',
+                        value: vs ? String(vs.grazes) : '—',
+                        bar: vs ? <VStatBar value={vs.grazes} max={20} color='#66aaff' /> : null,
+                      },
+                    ].map(({ label, value, bar }) => (
+                      <div key={label} className="pt-2">
+                        <div className="flex justify-between items-baseline">
+                          <span className="text-[8px] tracking-[0.2em] uppercase text-white/25">{label}</span>
+                          <span className="text-xs font-black font-mono text-white/55">{value}</span>
+                        </div>
+                        {bar ?? <div className="w-full h-1 rounded-full mt-1" style={{ background: 'rgba(255,255,255,0.04)' }} />}
                       </div>
-                      {bar}
-                    </div>
-                  ))}
-                  <div className="pb-1" />
+                    ))}
+                  </div>
                 </motion.div>
 
                 {/* CTA button */}
                 <motion.div
-                  initial={{ opacity: 0, y: 10 }}
+                  initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 2.1, duration: 0.5 }}
                 >
                   <button
                     onClick={startGame}
-                    className="px-10 py-3 font-black text-base tracking-[0.25em] uppercase transition-all duration-300"
+                    className="px-10 py-2.5 font-black text-sm tracking-[0.25em] uppercase transition-all duration-300"
                     style={{
                       border: '2px solid #00ffcc',
                       color: '#00ffcc',
                       borderRadius: '2px',
                       background: 'transparent',
-                      boxShadow: '0 0 20px rgba(0,255,204,0.2), inset 0 0 20px rgba(0,255,204,0)',
+                      boxShadow: '0 0 20px rgba(0,255,204,0.2)',
                     }}
                     onMouseEnter={e => {
                       (e.currentTarget as HTMLButtonElement).style.background = '#00ffcc';
