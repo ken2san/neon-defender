@@ -7501,9 +7501,9 @@ export default function App() {
         {/* CRT Vignette */}
         <div className="absolute inset-0 pointer-events-none z-20 shadow-[inset_0_0_100px_rgba(0,0,0,0.4)]" />
 
-        {/* Debug status badge — PC only, floats above Input_Debug */}
+        {/* Debug status badge — PC only, floats above the merged debug panel */}
         {debugMode && !isMobile && gameState === 'PLAYING' && (
-          <div className="absolute bottom-[13.5rem] right-4 z-30 pointer-events-none flex items-center gap-1.5">
+          <div className="absolute bottom-[8.5rem] right-4 z-30 pointer-events-none flex items-center gap-1.5">
             <span className="text-[7px] text-yellow-400/40 font-black uppercase tracking-widest">debug</span>
             {godMode && <span className="text-[8px] font-black text-yellow-300 bg-yellow-400/15 border border-yellow-400/30 px-1.5 py-px rounded">★ GOD</span>}
           </div>
@@ -7576,20 +7576,19 @@ export default function App() {
         </div>
 
         {showDebugOverlay && gameState === 'PLAYING' && (
-          <div className="absolute bottom-4 right-4 pointer-events-none bg-black/65 border border-[#00ffcc]/30 rounded px-2 py-1.5 text-[9px] leading-tight text-[#bfffee] font-mono z-30">
-            <div className="text-[8px] text-[#00ffcc] uppercase tracking-widest mb-1">Perf_Baseline</div>
-            <div>FPS p50 {perfStats.fpsP50.toFixed(1)} | p95 {perfStats.fpsP95.toFixed(1)}</div>
-            <div>Frame p50 {perfStats.frameMsP50.toFixed(2)}ms | p95 {perfStats.frameMsP95.toFixed(2)}ms</div>
-            <div>Obj E:{perfStats.enemies} PB:{perfStats.bullets} EB:{perfStats.enemyBullets} P:{perfStats.particles}</div>
-          </div>
-        )}
-
-        {showDebugOverlay && gameState === 'PLAYING' && (
-          <div className="absolute bottom-[9rem] right-4 pointer-events-none bg-black/65 border border-[#ffcc00]/30 rounded px-2 py-1.5 text-[9px] leading-tight text-[#ffe9b3] font-mono z-30">
-            <div className="text-[8px] text-[#ffcc00] uppercase tracking-widest mb-1">Input_Debug</div>
-            <div>Mouse:{isMouseDown.current ? '1' : '0'} Touch:{isTouching.current ? '1' : '0'} Virtual:{isVirtualDragActive.current ? '1' : '0'}</div>
-            <div>Sling:{isSlingshotMode.current ? '1' : '0'} Charged:{isSlingshotCharged.current ? '1' : '0'} Armed:{slingshotArmed.current ? '1' : '0'}</div>
-            <div>Idle:{Math.max(0, Date.now() - lastInputActivityAt.current)}ms Anchor:{mouseAnchorPos.current ? '1' : '0'}</div>
+          <div className="absolute bottom-4 right-4 pointer-events-none bg-black/65 border border-white/10 rounded overflow-hidden text-[9px] leading-tight font-mono z-30">
+            <div className="px-2 py-1.5 border-b border-[#ffcc00]/20 text-[#ffe9b3]">
+              <div className="text-[8px] text-[#ffcc00] uppercase tracking-widest mb-1">Input_Debug</div>
+              <div>Mouse:{isMouseDown.current ? '1' : '0'} Touch:{isTouching.current ? '1' : '0'} Virtual:{isVirtualDragActive.current ? '1' : '0'}</div>
+              <div>Sling:{isSlingshotMode.current ? '1' : '0'} Charged:{isSlingshotCharged.current ? '1' : '0'} Armed:{slingshotArmed.current ? '1' : '0'}</div>
+              <div>Idle:{Math.max(0, Date.now() - lastInputActivityAt.current)}ms Anchor:{mouseAnchorPos.current ? '1' : '0'}</div>
+            </div>
+            <div className="px-2 py-1.5 text-[#bfffee]">
+              <div className="text-[8px] text-[#00ffcc] uppercase tracking-widest mb-1">Perf_Baseline</div>
+              <div>FPS p50 {perfStats.fpsP50.toFixed(1)} | p95 {perfStats.fpsP95.toFixed(1)}</div>
+              <div>Frame p50 {perfStats.frameMsP50.toFixed(2)}ms | p95 {perfStats.frameMsP95.toFixed(2)}ms</div>
+              <div>Obj E:{perfStats.enemies} PB:{perfStats.bullets} EB:{perfStats.enemyBullets} P:{perfStats.particles}</div>
+            </div>
           </div>
         )}
 
