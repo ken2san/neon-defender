@@ -824,6 +824,112 @@ class RetroAudio {
     });
   }
 
+  playVictoryFanfare() {
+    if (!this.ctx || !this.masterGain) return;
+    const t = this.ctx.currentTime;
+    const master = this.masterGain;
+
+    // -- Part 1: ascending arpeggio (ta-ta-ta-TAAH) --
+    // C5, E5, G5, C6 at 0.13s intervals, square wave lead
+    const arpeNotes = [523.25, 659.25, 783.99, 1046.50];
+    arpeNotes.forEach((freq, i) => {
+      const osc = this.ctx!.createOscillator();
+      const g = this.ctx!.createGain();
+      const start = t + i * 0.13;
+      const isAccent = i === 3;
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(freq, start);
+      g.gain.setValueAtTime(isAccent ? 0.14 : 0.09, start);
+      g.gain.exponentialRampToValueAtTime(0.001, start + (isAccent ? 0.28 : 0.10));
+      osc.connect(g); g.connect(master);
+      osc.start(start);
+      osc.stop(start + 0.30);
+      osc.onended = () => { osc.disconnect(); g.disconnect(); };
+    });
+
+    // Bass: C3 under arpeggio
+    const bass1 = this.ctx.createOscillator();
+    const bass1g = this.ctx.createGain();
+    bass1.type = 'sawtooth';
+    bass1.frequency.setValueAtTime(130.81, t);
+    bass1g.gain.setValueAtTime(0.10, t);
+    bass1g.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
+    bass1.connect(bass1g); bass1g.connect(master);
+    bass1.start(t); bass1.stop(t + 0.55);
+    bass1.onended = () => { bass1.disconnect(); bass1g.disconnect(); };
+
+    // Sparkle shimmer at the accent (t + 0.39): rapid high pings descending
+    const shimmerFreqs = [2093, 1760, 1568, 1319, 1047];
+    shimmerFreqs.forEach((freq, i) => {
+      const osc = this.ctx!.createOscillator();
+      const g = this.ctx!.createGain();
+      const s = t + 0.39 + i * 0.038;
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, s);
+      g.gain.setValueAtTime(0.07, s);
+      g.gain.exponentialRampToValueAtTime(0.001, s + 0.08);
+      osc.connect(g); g.connect(master);
+      osc.start(s); osc.stop(s + 0.09);
+      osc.onended = () => { osc.disconnect(); g.disconnect(); };
+    });
+
+    // -- Part 2: melodic phrase (ta-ta-TAAAAAAH) at t + 0.65 --
+    const phrase = [
+      { freq: 783.99, start: 0.65, dur: 0.12 }, // G5
+      { freq: 880.00, start: 0.79, dur: 0.12 }, // A5
+      { freq: 1046.50, start: 0.93, dur: 1.00 }, // C6 — long held
+    ];
+    phrase.forEach(({ freq, start: s, dur }) => {
+      const osc = this.ctx!.createOscillator();
+      const g = this.ctx!.createGain();
+      const isFinal = dur > 0.5;
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(freq, t + s);
+      if (isFinal) {
+        // vibrato on the final note via LFO
+        const lfo = this.ctx!.createOscillator();
+        const lfoG = this.ctx!.createGain();
+        lfo.frequency.value = 5.5;
+        lfoG.gain.value = 8;
+        lfo.connect(lfoG); lfoG.connect(osc.frequency);
+        lfo.start(t + s); lfo.stop(t + s + dur + 0.1);
+        lfo.onended = () => { lfo.disconnect(); lfoG.disconnect(); };
+      }
+      g.gain.setValueAtTime(isFinal ? 0.13 : 0.09, t + s);
+      g.gain.exponentialRampToValueAtTime(0.001, t + s + dur);
+      osc.connect(g); g.connect(master);
+      osc.start(t + s); osc.stop(t + s + dur + 0.05);
+      osc.onended = () => { osc.disconnect(); g.disconnect(); };
+    });
+
+    // Harmony: triangle E5+G5 under the final phrase
+    [[659.25, 0.65], [659.25, 0.93]].forEach(([freq, s]) => {
+      const osc = this.ctx!.createOscillator();
+      const g = this.ctx!.createGain();
+      const isFinal = s === 0.93;
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, t + s);
+      g.gain.setValueAtTime(0.06, t + s);
+      g.gain.exponentialRampToValueAtTime(0.001, t + s + (isFinal ? 1.0 : 0.15));
+      osc.connect(g); g.connect(master);
+      osc.start(t + s); osc.stop(t + s + (isFinal ? 1.05 : 0.16));
+      osc.onended = () => { osc.disconnect(); g.disconnect(); };
+    });
+
+    // Bass: G2 under phrase 2, C3 final
+    [[196.00, 0.65, 0.30], [130.81, 0.93, 1.0]].forEach(([freq, s, dur]) => {
+      const osc = this.ctx!.createOscillator();
+      const g = this.ctx!.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, t + s);
+      g.gain.setValueAtTime(0.09, t + s);
+      g.gain.exponentialRampToValueAtTime(0.001, t + s + dur);
+      osc.connect(g); g.connect(master);
+      osc.start(t + s); osc.stop(t + s + dur + 0.05);
+      osc.onended = () => { osc.disconnect(); g.disconnect(); };
+    });
+  }
+
   stopBGM() {
     if (this.bgmInterval !== null) {
       clearInterval(this.bgmInterval);
