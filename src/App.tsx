@@ -42,9 +42,6 @@ const TOUCH_SLINGSHOT_RESISTANCE = 0.3;
 const TOUCH_INPUT_VELOCITY_SMOOTHING = 0.55;
 const INPUT_WATCHDOG_RELEASE_MS = 280;
 const INPUT_WATCHDOG_HARD_RELEASE_MS = 1200;
-const INPUT_DEBUG_LOG_PARAM = 'debug';
-const INPUT_DEBUG_STORAGE_KEY = 'neon:debug';
-const INPUT_DEBUG_BOOT_LOGGED_STORAGE_KEY = 'neon:debug-boot-logged';
 const INPUT_DEBUG_MIN_LOG_INTERVAL_MS = 120;
 
 const VFX_PARTICLE_DESKTOP_MULTIPLIER = 0.75;
@@ -186,10 +183,7 @@ export default function App() {
   const [isTouchDevice, setIsTouchDevice] = useState(false);
   const TUTORIAL_SEEN_KEY = 'neon:tutorial-seen';
   const [showTutorial, setShowTutorial] = useState(false);
-  const showDebugOverlay = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get(INPUT_DEBUG_LOG_PARAM) === '1' || window.localStorage.getItem(INPUT_DEBUG_STORAGE_KEY) === '1';
-  })[0];
+
   const [hasWingman, setHasWingman] = useState(false);
   const wingmanRef = useRef(false);
   const wingmanPos = useRef({ x: 0, y: 0 });
@@ -1305,28 +1299,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const param = params.get(INPUT_DEBUG_LOG_PARAM);
-
-    if (param === '1') {
-      window.localStorage.setItem(INPUT_DEBUG_STORAGE_KEY, '1');
-    } else if (param === '0') {
-      window.localStorage.removeItem(INPUT_DEBUG_STORAGE_KEY);
-      window.sessionStorage.removeItem(INPUT_DEBUG_BOOT_LOGGED_STORAGE_KEY);
-    }
-
-    const enabled = param === '1' || window.localStorage.getItem(INPUT_DEBUG_STORAGE_KEY) === '1';
-    inputDebugLogEnabledRef.current = enabled;
-
-    if (enabled) {
-      const hasBootLogged = window.sessionStorage.getItem(INPUT_DEBUG_BOOT_LOGGED_STORAGE_KEY) === '1';
-      if (!hasBootLogged) {
-        console.info('[NEON][debug] enabled. Disable with ?debug=0');
-        logInputDebug('logging-enabled', {
-          source: param === '1' ? 'query' : 'storage',
-        });
-        window.sessionStorage.setItem(INPUT_DEBUG_BOOT_LOGGED_STORAGE_KEY, '1');
-      }
+    inputDebugLogEnabledRef.current = debugMode;
+    if (debugMode) {
+      console.info('[NEON][debug] enabled. Disable by removing ?debug=1 from URL.');
+      logInputDebug('logging-enabled', { source: 'query' });
     }
   }, []);
 
@@ -1343,7 +1319,7 @@ export default function App() {
       keysPressed.current[e.code] = true;
 
       // Dev-only god mode toggle
-      if ((import.meta.env.DEV || debugMode) && !e.repeat && e.code === 'KeyG') {
+      if (debugMode && !e.repeat && e.code === 'KeyG') {
         const next = !godModeRef.current;
         godModeRef.current = next;
         setGodMode(next);
@@ -1354,7 +1330,7 @@ export default function App() {
       }
 
       // Debug: Alt+1…5  →  jump to the first wave of that stage
-      if ((import.meta.env.DEV || debugMode) && !e.repeat && e.altKey &&
+      if (debugMode && !e.repeat && e.altKey &&
           ['Digit1','Digit2','Digit3','Digit4','Digit5'].includes(e.code)) {
         e.preventDefault();
         const stageNum = parseInt(e.code.replace('Digit', ''));
@@ -1364,7 +1340,7 @@ export default function App() {
       }
 
       // Debug: Alt+6  →  jump directly to VICTORY (ending) for testing
-      if ((import.meta.env.DEV || debugMode) && !e.repeat && e.altKey && e.code === 'Digit6') {
+      if (debugMode && !e.repeat && e.altKey && e.code === 'Digit6') {
         e.preventDefault();
         audio.stopBGM();
         victoryPendingRef.current = true;
