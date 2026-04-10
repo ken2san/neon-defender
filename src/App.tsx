@@ -4157,7 +4157,9 @@ export default function App() {
               const e = enemies.current[si];
               if (e.alive && !e.isBoss) liveSubCount++;
             }
-            if (liveSubCount < 8 && currentTime - (enemy.lastShotTime || 0) > (enemy.phase === 3 ? 1400 : 2600)) {
+            // At reduced sim tier, cap sub-enemies at 4 — halves chase/render cost during SWARM fight.
+            const swarmSubCap = isReducedSim ? 4 : 8;
+            if (liveSubCount < swarmSubCap && currentTime - (enemy.lastShotTime || 0) > (enemy.phase === 3 ? 1400 : 2600)) {
               enemy.lastShotTime = currentTime;
               for (let i = 0; i < 2; i++) {
                 const offsetX = (Math.random() - 0.5) * 60;
@@ -6637,9 +6639,9 @@ export default function App() {
           ctx.arc(0, 0, 40 + pulse, 0, Math.PI * 2);
           ctx.stroke();
 
-          // Rotating Rings
+          // Rotating Rings — skip entirely at tier 2 (ellipse + rotate is expensive on mobile)
           const angleOffset = (drawNow / 1000) * Math.PI;
-          const ringCount = isMinimalBossFx ? 1 : isReducedBossFx ? 1 : 2;
+          const ringCount = isMinimalBossFx ? 0 : isReducedBossFx ? 1 : 2;
           for (let i = 0; i < ringCount; i++) {
             ctx.save();
             ctx.rotate(angleOffset * (i + 1) * 0.5);
@@ -6676,7 +6678,7 @@ export default function App() {
           ctx.fillRect(-enemy.width / 2 + 10, -10, 5, 20);
           ctx.fillRect(enemy.width / 2 - 15, -10, 5, 20);
         }
-        if (enemy.phase! >= 3) {
+        if (enemy.phase! >= 3 && !isMinimalBossFx) {
           ctx.strokeStyle = '#ffffff';
           ctx.beginPath();
           ctx.arc(0, 0, 40, 0, Math.PI * 2);
