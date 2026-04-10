@@ -4836,8 +4836,9 @@ export default function App() {
             });
           }
 
-          // Chrono Trigger
-          if (hasChrono && !isOverdriveActiveRef.current && Math.random() < 0.15) {
+          // Chrono Trigger — suppressed during boss wave: repeated SWARM kills would make
+          // timeScale spike to 0.3 repeatedly, causing the laser beam to visually stutter.
+          if (hasChrono && !isOverdriveActiveRef.current && !bossAlive && Math.random() < 0.15) {
             timeScale.current = 0.3;
           }
           bullet.alive = false;
@@ -7967,7 +7968,7 @@ export default function App() {
       {/* Footer & Fullscreen */}
       <div className="mt-2 md:mt-8 text-[9px] text-gray-700 uppercase tracking-[0.5em] flex flex-col items-center gap-1">
         <div className="flex items-center gap-4">
-          <span>Arcade Revision 2.5</span>
+          <span>Arcade Revision 2.6</span>
           <span className="w-1 h-1 bg-gray-800 rounded-full" />
           {!isIOSStandalone && (
             <button
