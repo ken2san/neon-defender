@@ -8152,7 +8152,7 @@ export default function App() {
                     ]
                   }}
                   transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-                  className="mb-12"
+                  className="mb-6 md:mb-12"
                 >
                   <div className="relative">
                     <div className="absolute inset-0 bg-[#00ffcc]/20 blur-2xl rounded-full scale-150 animate-pulse" />
@@ -8164,7 +8164,7 @@ export default function App() {
                 </motion.div>
 
                 {/* Editorial Typography Title */}
-                <div className="text-center mb-16 relative">
+                <div className="text-center mb-8 md:mb-16 relative">
                   <motion.div
                     initial={{ scaleX: 0 }}
                     animate={{ scaleX: 1 }}
@@ -8189,7 +8189,7 @@ export default function App() {
                 </div>
 
                 {/* Refined Neon Button */}
-                <div className="flex flex-col items-center gap-12 w-full">
+                <div className="flex flex-col items-center gap-6 md:gap-12 w-full">
                   <button
                     onClick={startGame}
                     className="group relative px-16 py-5 overflow-hidden transition-all duration-500"
@@ -8245,7 +8245,7 @@ export default function App() {
               </motion.div>
 
               {/* Minimal Footer Instructions */}
-              <div className="absolute bottom-12 flex flex-col items-center gap-3 opacity-30">
+              <div className="absolute bottom-4 md:bottom-12 flex flex-col items-center gap-3 opacity-30">
                 <div className="flex gap-12 text-[7px] font-black tracking-[0.6em] text-white uppercase">
                   <span>Drag to Tension</span>
                   <div className="w-1 h-1 bg-white rounded-full self-center" />
