@@ -637,9 +637,51 @@ export default function App() {
     }
   };
 
+  const cancelActiveInputGesture = () => {
+    if (pointerTapTimer.current !== null) {
+      window.clearTimeout(pointerTapTimer.current);
+      pointerTapTimer.current = null;
+    }
+    if (virtualDragReleaseTimer.current !== null) {
+      window.clearTimeout(virtualDragReleaseTimer.current);
+      virtualDragReleaseTimer.current = null;
+    }
+    if (idleFireTimer.current !== null) {
+      window.clearTimeout(idleFireTimer.current);
+      idleFireTimer.current = null;
+    }
+
+    isMouseDown.current = false;
+    isTouching.current = false;
+    isSlingshotMode.current = false;
+    isSlingshotCharged.current = false;
+    isVirtualDragActive.current = false;
+    keysPressed.current['TouchFire'] = false;
+
+    if (document.pointerLockElement === canvasRef.current) {
+      document.exitPointerLock();
+    }
+
+    mouseAnchorPos.current = null;
+    slingshotArmed.current = false;
+    slingshotArmedExpiry.current = 0;
+    slingshotArmedPos.current = null;
+    inputVel.current.x = 0;
+    inputVel.current.y = 0;
+    inputHistory.current.length = 0;
+
+    targetPos.current.x = playerPos.current.x;
+    targetPos.current.y = playerPos.current.y;
+    playerStartPos.current.x = playerPos.current.x;
+    playerStartPos.current.y = playerPos.current.y;
+    currentMousePos.current.x = playerPos.current.x + PLAYER_WIDTH / 2;
+    currentMousePos.current.y = playerPos.current.y + PLAYER_HEIGHT / 2;
+  };
+
   const handlePlayerHit = () => {
     if (godModeRef.current) return;
     if (Date.now() < invulnerableUntil.current) return;
+    cancelActiveInputGesture();
     hitsTakenRef.current++;
 
     const damage = 20; // 5 hits to die
@@ -5440,6 +5482,10 @@ export default function App() {
       const isDragging = isMouseDown.current || isTouching.current;
       const isHighTension = isDragging && isSlingshotCharged.current;
 
+      if (isDragging) {
+        cancelActiveInputGesture();
+      }
+
       // Auto-bomb if overdrive is full
       if (overdriveGauge.current >= MAX_OVERDRIVE && !isOverdriveActiveRef.current) {
         activateOverdrive();
@@ -5458,11 +5504,7 @@ export default function App() {
         // If it was a counter hit, the shield break is more violent
         if (isHighTension) {
           createExplosion(playerPos.current.x + PLAYER_WIDTH/2, playerPos.current.y + PLAYER_HEIGHT/2, '#ff0066', 25);
-          isMouseDown.current = false; // Force release
-          mouseAnchorPos.current = null;
-          isTouching.current = false;
-          isSlingshotMode.current = false;
-          isSlingshotCharged.current = false;
+          cancelActiveInputGesture();
         }
         return;
       }
@@ -5479,12 +5521,7 @@ export default function App() {
       if (isHighTension) {
         overdriveGauge.current = Math.max(0, overdriveGauge.current - 20);
         setOverdrive(overdriveGauge.current);
-        // Force release of the slingshot
-        isMouseDown.current = false;
-        mouseAnchorPos.current = null;
-        isTouching.current = false;
-        isSlingshotMode.current = false;
-        isSlingshotCharged.current = false;
+        cancelActiveInputGesture();
       }
 
       // Spawn player explosion particles
