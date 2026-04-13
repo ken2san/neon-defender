@@ -879,11 +879,20 @@ export default function App() {
     }
 
     const center = getPlayerInputCenter();
-    mouseAnchorPos.current = center;
-    currentMousePos.current = center;
-    playerStartPos.current = { x: playerPos.current.x, y: playerPos.current.y };
-    inputVel.current = { x: 0, y: 0 };
-    inputHistory.current = [{ x: center.x, y: center.y, t: Date.now() }];
+    if (mouseAnchorPos.current) {
+      mouseAnchorPos.current.x = center.x;
+      mouseAnchorPos.current.y = center.y;
+    } else {
+      mouseAnchorPos.current = { x: center.x, y: center.y };
+    }
+    currentMousePos.current.x = center.x;
+    currentMousePos.current.y = center.y;
+    playerStartPos.current.x = playerPos.current.x;
+    playerStartPos.current.y = playerPos.current.y;
+    inputVel.current.x = 0;
+    inputVel.current.y = 0;
+    inputHistory.current.length = 0;
+    inputHistory.current.push({ x: center.x, y: center.y, t: Date.now() });
 
     if (enablePointerLock) {
       requestSlingshotPointerLock();
@@ -2062,16 +2071,25 @@ export default function App() {
           // Roll lastIdleFireAt while attack is still active so the 500ms grace window
           // starts from attack-end, not from idle-fire time (covers long-pull attacks).
           if (slingshotTravelUntil.current > now || slingshotAttackUntil.current > now || now - lastIdleFireAt.current < 500) {
-            currentMousePos.current = { x, y };
+            currentMousePos.current.x = x;
+            currentMousePos.current.y = y;
             if (slingshotAttackUntil.current > now) lastIdleFireAt.current = now;
           } else {
             isMouseDown.current = true;
             isVirtualDragActive.current = false;
             clearVirtualDragReleaseTimer();
-            currentMousePos.current = { x, y };
-            mouseAnchorPos.current = { x, y };
-            playerStartPos.current = { x: playerPos.current.x, y: playerPos.current.y };
-            inputHistory.current = [{ x, y, t: now }];
+            currentMousePos.current.x = x;
+            currentMousePos.current.y = y;
+            if (mouseAnchorPos.current) {
+              mouseAnchorPos.current.x = x;
+              mouseAnchorPos.current.y = y;
+            } else {
+              mouseAnchorPos.current = { x, y };
+            }
+            playerStartPos.current.x = playerPos.current.x;
+            playerStartPos.current.y = playerPos.current.y;
+            inputHistory.current.length = 0;
+            inputHistory.current.push({ x, y, t: now });
 
             const ctrlHeld = e.ctrlKey || keysPressed.current['ControlLeft'] || keysPressed.current['ControlRight'];
             isSlingshotMode.current = ctrlHeld;
@@ -2110,8 +2128,10 @@ export default function App() {
         canvasScaleRef.current = rect.height / CANVAS_HEIGHT;
         const x = ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
         const y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
-        const previousPhysical = { ...physicalMousePos.current };
-        physicalMousePos.current = { x, y };
+        const previousPhysicalX = physicalMousePos.current.x;
+        const previousPhysicalY = physicalMousePos.current.y;
+        physicalMousePos.current.x = x;
+        physicalMousePos.current.y = y;
 
         let effectiveX = x;
         let effectiveY = y;
@@ -2119,19 +2139,18 @@ export default function App() {
         if (isMouseDown.current && isSlingshotMode.current && mouseAnchorPos.current && !isTouching.current) {
           const deltaX = document.pointerLockElement === canvasRef.current
             ? (e.movementX / rect.width) * CANVAS_WIDTH
-            : x - previousPhysical.x;
+            : x - previousPhysicalX;
           const deltaY = document.pointerLockElement === canvasRef.current
             ? (e.movementY / rect.height) * CANVAS_HEIGHT
-            : y - previousPhysical.y;
+            : y - previousPhysicalY;
 
-          currentMousePos.current = {
-            x: Math.max(0, Math.min(CANVAS_WIDTH, currentMousePos.current.x + deltaX)),
-            y: Math.max(0, Math.min(CANVAS_HEIGHT, currentMousePos.current.y + deltaY)),
-          };
+          currentMousePos.current.x = Math.max(0, Math.min(CANVAS_WIDTH, currentMousePos.current.x + deltaX));
+          currentMousePos.current.y = Math.max(0, Math.min(CANVAS_HEIGHT, currentMousePos.current.y + deltaY));
           effectiveX = currentMousePos.current.x;
           effectiveY = currentMousePos.current.y;
         } else {
-          currentMousePos.current = { x, y };
+          currentMousePos.current.x = x;
+          currentMousePos.current.y = y;
         }
 
         // Track velocity for flick detection (same as touch)
